@@ -1,0 +1,100 @@
+const crypto = require("crypto");
+const db = require("../lib/db");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sesiones: cookie firmada con HMAC. Sencillo, suficiente para MVP.
+// Sustituible por JWT o express-session sin tocar las rutas.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const COOKIE = "op_session";
+const TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 días
+
+function sign(payload, secret) {
+  const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = crypto.createHmac("sha256", secret).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
+
+function verify(token, secret) {
+  if (!token || !token.includes(".")) return null;
+  const [data, sig] = token.split(".");
+  const expected = crypto.createHmac("sha256", secret).update(data).digest("base64url");
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(data, "base64url").toString());
+    if (payload.exp && payload.exp < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function setSession(res, secret, userId) {
+  const token = sign({ userId, exp: Date.now() + TTL_MS }, secret);
+  res.cookie(COOKIE, token, { httpOnly: true, sameSite: "lax", maxAge: TTL_MS });
+}
+
+function clearSession(res) {
+  res.clearCookie(COOKIE);
+}
+
+// Middleware: lee la cookie, carga el usuario y su organización.
+function attachUser(secret) {
+  return (req, res, next) => {
+    const token = req.cookies[COOKIE];
+    const payload = verify(token, secret);
+    if (payload) {
+      const user = db.findOne("users", (u) => u.id === payload.userId && u.status === "active");
+      if (user) {
+        req.user = user;
+        req.org = user.organizationId
+          ? db.findOne("organizations", (o) => o.id === user.organizationId)
+          : null;
+      }
+    }
+    next();
+  };
+}
+
+// Exige sesión activa
+function requireAuth(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: "auth_required" });
+  next();
+}
+
+// Exige uno de los roles permitidos
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: "auth_required" });
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error: "forbidden" });
+    next();
+  };
+}
+
+// Aísla por organización: añade un filtro `req.scope` que las rutas usan para
+// pedir solo datos de su tenant. El superadmin puede pasar `?orgId=...` para
+// inspeccionar cualquier academia.
+function tenantScope(req, res, next) {
+  if (!req.user) {
+    req.scope = { orgId: null };
+    return next();
+  }
+  if (req.user.role === "superadmin") {
+    req.scope = { orgId: req.query.orgId || null, isSuper: true };
+  } else {
+    req.scope = { orgId: req.user.organizationId };
+  }
+  next();
+}
+
+module.exports = {
+  COOKIE,
+  setSession,
+  clearSession,
+  attachUser,
+  requireAuth,
+  requireRole,
+  tenantScope,
+  sign,
+  verify,
+};
