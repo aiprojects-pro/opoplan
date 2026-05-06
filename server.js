@@ -114,12 +114,6 @@ app.use((err, req, res, next) => {
 
 app.listen(port, () => {
   console.log(`\n🎓 OpoPlan corriendo en ${appUrl}\n`);
-  console.log("Usuarios demo:");
-  console.log("  - super@opoplan.local / super123  (super-admin)");
-  console.log("  - admin@opoplan.local / admin123  (admin Academia Demo)");
-  console.log("  - preparador@opoplan.local / prep123");
-  console.log("  - lucia@opoplan.local / opo123");
-  console.log("");
 
   // Scheduler de recordatorios automáticos (24h y 1h antes de cada evento)
   require("./src/lib/scheduler").start({ appUrl });

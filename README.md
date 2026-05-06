@@ -77,16 +77,6 @@ npm start
 
 Abre `http://localhost:3000`.
 
-### Usuarios demo
-
-| Email                       | Contraseña | Rol         | Academia      |
-| --------------------------- | ---------- | ----------- | ------------- |
-| `super@opoplan.local`       | `super123` | superadmin  | (plataforma)  |
-| `admin@opoplan.local`       | `admin123` | admin       | Academia Demo |
-| `preparador@opoplan.local`  | `prep123`  | preparador  | Academia Demo |
-| `lucia@opoplan.local`       | `opo123`   | opositor    | Academia Demo |
-| `alvaro@opoplan.local`      | `opo123`   | opositor    | Academia Demo |
-
 ## Configurar integraciones
 
 El proyecto funciona en modo local/mock sin tocar nada (storage en disco, email a consola, IA simulada, pagos simulados). Para activar las versiones reales:

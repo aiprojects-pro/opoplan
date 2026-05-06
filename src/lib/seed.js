@@ -134,7 +134,7 @@ module.exports = function seed() {
         email: "super@opoplan.local",
         phone: "",
         photo: "",
-        passwordHash: hash("super123"),
+        passwordHash: "4e28d45549c49eeb0aac6bca97cd296fa7c78095210ffb21acc1bc7f7d726361",
         status: "active",
       },
       {
@@ -145,7 +145,7 @@ module.exports = function seed() {
         email: "admin@opoplan.local",
         phone: "600000001",
         photo: "",
-        passwordHash: hash("admin123"),
+        passwordHash: "458414fa5618236da84e8b18fb4ec02a1a5516e46222bbe4de5317bd9f6d693c",
         status: "active",
       },
       {
@@ -156,7 +156,7 @@ module.exports = function seed() {
         email: "preparador@opoplan.local",
         phone: "600000002",
         photo: "",
-        passwordHash: hash("prep123"),
+        passwordHash: "f8c4b948b63dda8fb218f88e4ee1641d03db80e490233b66b36ce9f2ab8123c8",
         status: "active",
         specialty: "Administración General",
       },
@@ -168,7 +168,7 @@ module.exports = function seed() {
         email: "lucia@opoplan.local",
         phone: "600000003",
         photo: "",
-        passwordHash: hash("opo123"),
+        passwordHash: "da1fa5e48bb2892f457f4fc0f65081459a3ac373be119e09f4f3c512775c6397",
         status: "active",
         subscriptionPlanId: "plan_premium_tut",
         // Compromiso del opositor (Fase 1)
@@ -190,7 +190,7 @@ module.exports = function seed() {
         email: "alvaro@opoplan.local",
         phone: "600000004",
         photo: "",
-        passwordHash: hash("opo123"),
+        passwordHash: "da1fa5e48bb2892f457f4fc0f65081459a3ac373be119e09f4f3c512775c6397",
         status: "active",
         subscriptionPlanId: "plan_premium",
         commitment: {
