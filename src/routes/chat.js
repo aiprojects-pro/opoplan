@@ -2,27 +2,67 @@ const express = require("express");
 const db = require("../lib/db");
 const auth = require("../middleware/auth");
 const aiService = require("../services/ai");
+const { CHATBOT_MODES } = require("../lib/constants");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chatbot por opositor.
 //
-// Reglas:
-//   - El preparador debe activar previamente el chatbot del opositor
-//     (campo `chatbotEnabled` en el usuario opositor).
-//   - El opositor crea hilos (threads) y envía mensajes.
-//   - Cada mensaje se almacena. La respuesta del bot se guarda en el mismo hilo.
-//   - El preparador puede ver todas las conversaciones de sus opositores.
-//   - Si la academia no tiene Gemini configurado se usa mock con aviso.
+// Bug arreglado de la conversación (~20:18): el preparador no podía activar
+// el chat con sus opositores ("conversaciones de mis opositores aquí no
+// selecciona una conversación. Si yo activo aquí no puedo todavía
+// comunicarme con ellos"). Causa: el toggle estaba a nivel global del
+// preparador en lugar de PER OPOSITOR. Solucionado: el chatbot se activa por
+// opositor (siempre fue así en el modelo) pero ahora el endpoint funciona aun
+// cuando el preparador no haya seleccionado conversación, y devuelve el modo
+// de chatbot que el preparador haya elegido (~20:18: "que esto se podría
+// programar... son cosas generales contéstale tú; si es específica espérate").
+//
+// Modos (constants.CHATBOT_MODES):
+//   - off
+//   - supervised: la IA NO responde; el opositor deja la duda, el preparador
+//     contesta cuando puede (manual)
+//   - auto_general: la IA responde dudas generales (planificación, técnicas
+//     de estudio). Las dudas específicas las marca como "para el preparador"
+//   - auto_full: la IA responde todo
+//
+// Selección de IA (orden de prioridad):
+//   1. IA personal del opositor (su propia API key, ~20:53)
+//   2. IA del preparador
+//   3. IA de la academia
+//   4. ENV global
+//   5. Mock
 // ─────────────────────────────────────────────────────────────────────────────
+
+const SPECIFIC_KEYWORDS = [
+  "tema ", "artículo", "ley ", "real decreto", "constitución",
+  "sentencia", "norma", "boletín", "boe", "test del", "examen del",
+  "supuesto", "rúbrica",
+];
+
+function classifyQuestion(text) {
+  const t = String(text || "").toLowerCase();
+  if (SPECIFIC_KEYWORDS.some((k) => t.includes(k))) return "specific";
+  return "general";
+}
 
 module.exports = function chatRoutes({ env }) {
   const r = express.Router();
   r.use(auth.requireAuth);
 
-  function getAi(orgId) {
-    const fallback = aiService.fromEnv(env || process.env);
-    const org = db.findOne("organizations", (o) => o.id === orgId);
-    return aiService.fromOrg(org, fallback);
+  function getAi(opositor) {
+    const fallbackEnv = aiService.fromEnv(env || process.env);
+    const org = db.findOne("organizations", (o) => o.id === opositor.organizationId);
+    let ai = aiService.fromOrg(org, fallbackEnv);
+
+    // Si su preparador tiene IA personal, prevalece sobre la academia
+    const a = db.findOne("assignments", (x) => x.opositorId === opositor.id && x.active);
+    if (a) {
+      const prep = db.findOne("users", (u) => u.id === a.preparadorId);
+      ai = aiService.fromUser(prep, ai);
+    }
+    // Si el opositor tiene IA personal, prevalece sobre todo (~20:53)
+    ai = aiService.fromUser(opositor, ai);
+    return ai;
   }
 
   function canSeeThread(user, t) {
@@ -34,6 +74,28 @@ module.exports = function chatRoutes({ env }) {
     }
     return false;
   }
+
+  // Modo del chatbot que aplica al opositor: el del preparador asignado.
+  function chatModeFor(opositor) {
+    const a = db.findOne("assignments", (x) => x.opositorId === opositor.id && x.active);
+    if (!a) return "supervised";
+    const prep = db.findOne("users", (u) => u.id === a.preparadorId);
+    return prep?.chatbotMode || "supervised";
+  }
+
+  // ── Estado actual del chat para un opositor ───────────────────────────────
+  // Útil para que la UI pinte de forma adecuada (~20:18).
+  r.get("/chat/status", auth.requireRole("opositor"), (req, res) => {
+    const opositor = db.findOne("users", (u) => u.id === req.user.id);
+    if (!opositor) return res.status(404).json({ error: "not_found" });
+    const mode = chatModeFor(opositor);
+    res.json({
+      enabled: !!opositor.chatbotEnabled,
+      mode,
+      modeLabel: CHATBOT_MODES.find((m) => m.id === mode)?.label || mode,
+      hasPersonalAi: !!opositor.ai?.enabled,
+    });
+  });
 
   // ── Listar hilos ───────────────────────────────────────────────────────────
 
@@ -48,7 +110,6 @@ module.exports = function chatRoutes({ env }) {
       list = list.filter((t) => myOpos.includes(t.opositorId));
     }
     if (req.query.opositorId) list = list.filter((t) => t.opositorId === req.query.opositorId);
-    // Ordenar por última actualización descendente
     list.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
     res.json({ threads: list });
   });
@@ -79,30 +140,64 @@ module.exports = function chatRoutes({ env }) {
     res.json({ thread: t });
   });
 
-  // ── Enviar mensaje + respuesta de la IA ───────────────────────────────────
+  // ── Enviar mensaje ────────────────────────────────────────────────────────
 
   r.post("/chat/threads/:id/messages", auth.requireRole("opositor"), async (req, res) => {
     const t = db.findOne("chatThreads", (x) => x.id === req.params.id);
     if (!t) return res.status(404).json({ error: "not_found" });
     if (t.opositorId !== req.user.id) return res.status(403).json({ error: "forbidden" });
     const opositor = db.findOne("users", (u) => u.id === req.user.id);
-    if (!opositor?.chatbotEnabled) {
-      return res.status(403).json({ error: "chatbot_not_enabled" });
-    }
+    if (!opositor?.chatbotEnabled) return res.status(403).json({ error: "chatbot_not_enabled" });
 
     const text = String(req.body?.text || "").trim();
     if (!text) return res.status(400).json({ error: "empty_message" });
 
-    // Construir contexto: temario, plan, últimos resultados de pruebas
-    const ai = getAi(req.user.organizationId);
-    const context = buildContext(opositor);
-    const system = `Eres un asistente educativo para opositores españoles. Responde en español, de forma clara y concisa. Cita siempre al BOE o normativa cuando proceda. Información del estudiante:\n${context}\n\nIMPORTANTE: tus respuestas son revisadas por su preparador. No inventes datos. Si no estás seguro, dilo. No proporciones contenido inapropiado, off-topic o que pueda perjudicar el aprendizaje.`;
+    const mode = chatModeFor(opositor);
 
-    const history = (t.messages || []).map((m) => ({ role: m.role, text: m.text }));
-
-    // Guardamos primero el mensaje del usuario
+    // Mensaje del usuario siempre se guarda
     const userMsg = { id: db.id("msg"), role: "user", text, at: new Date().toISOString() };
     const messages = [...(t.messages || []), userMsg];
+
+    // Si el modo es "off" o "supervised", no respondemos automáticamente.
+    if (mode === "off" || mode === "supervised") {
+      const note = {
+        id: db.id("msg"),
+        role: "system",
+        text: "Tu pregunta queda registrada. Tu preparador la verá y te responderá.",
+        at: new Date().toISOString(),
+      };
+      messages.push(note);
+      db.update("chatThreads", (x) => x.id === t.id, {
+        messages,
+        updatedAt: new Date().toISOString(),
+        ...(t.title === "Nueva conversación" ? { title: text.slice(0, 60) } : {}),
+      });
+      return res.json({ userMessage: userMsg, botMessage: note, mode });
+    }
+
+    // Si el modo es "auto_general" y la pregunta parece específica,
+    // dejamos pendiente para el preparador.
+    if (mode === "auto_general" && classifyQuestion(text) === "specific") {
+      const note = {
+        id: db.id("msg"),
+        role: "system",
+        text: "Esta pregunta parece específica de tu temario. La he marcado para que la responda tu preparador. Si quieres una respuesta inmediata, reformula la duda en términos generales.",
+        at: new Date().toISOString(),
+      };
+      messages.push(note);
+      db.update("chatThreads", (x) => x.id === t.id, {
+        messages,
+        updatedAt: new Date().toISOString(),
+        ...(t.title === "Nueva conversación" ? { title: text.slice(0, 60) } : {}),
+      });
+      return res.json({ userMessage: userMsg, botMessage: note, mode });
+    }
+
+    // En modo auto, llamamos a la IA
+    const ai = getAi(opositor);
+    const context = buildContext(opositor);
+    const system = `Eres un asistente educativo para opositores españoles. Responde en español de forma clara, concisa y amable. Cita el BOE o la normativa aplicable cuando proceda. Información del estudiante:\n${context}\n\nIMPORTANTE: tus respuestas son revisadas por su preparador. No inventes datos ni cifras. Si no estás seguro, dilo.`;
+    const history = (t.messages || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", text: m.text }));
 
     let aiResponse;
     try {
@@ -125,16 +220,32 @@ module.exports = function chatRoutes({ env }) {
     db.update("chatThreads", (x) => x.id === t.id, {
       messages,
       updatedAt: new Date().toISOString(),
-      // Auto-titular el hilo si era el primer mensaje
-      ...(t.title === "Nueva conversación" && messages.length <= 2
-        ? { title: text.slice(0, 60) }
-        : {}),
+      ...(t.title === "Nueva conversación" && messages.length <= 2 ? { title: text.slice(0, 60) } : {}),
     });
 
-    res.json({ userMessage: userMsg, botMessage: botMsg });
+    res.json({ userMessage: userMsg, botMessage: botMsg, mode });
   });
 
-  // ── Borrar hilo ────────────────────────────────────────────────────────────
+  // El preparador puede contestar manualmente a un hilo (~20:18 – modo
+  // supervisado). El mensaje sale como `assistant` con marca `manual: true`.
+  r.post("/chat/threads/:id/reply", auth.requireRole("preparador", "admin", "superadmin"), (req, res) => {
+    const t = db.findOne("chatThreads", (x) => x.id === req.params.id);
+    if (!t) return res.status(404).json({ error: "not_found" });
+    if (!canSeeThread(req.user, t)) return res.status(403).json({ error: "forbidden" });
+    const text = String(req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ error: "empty_message" });
+    const msg = {
+      id: db.id("msg"),
+      role: "assistant",
+      text,
+      at: new Date().toISOString(),
+      manual: true,
+      authorId: req.user.id,
+    };
+    const messages = [...(t.messages || []), msg];
+    db.update("chatThreads", (x) => x.id === t.id, { messages, updatedAt: new Date().toISOString() });
+    res.json({ message: msg });
+  });
 
   r.delete("/chat/threads/:id", (req, res) => {
     const t = db.findOne("chatThreads", (x) => x.id === req.params.id);
@@ -144,18 +255,26 @@ module.exports = function chatRoutes({ env }) {
     res.json({ ok: true });
   });
 
-  // ── Activar / desactivar el chatbot por opositor (solo preparador/admin) ──
+  // ── Activar / desactivar chatbot por opositor (preparador / admin) ────────
 
   r.patch("/chat/users/:opositorId/enable", auth.requireRole("preparador", "admin", "superadmin"), (req, res) => {
     const opo = db.findOne("users", (u) => u.id === req.params.opositorId && u.role === "opositor");
     if (!opo) return res.status(404).json({ error: "not_found" });
-    // Si es preparador, comprobar asignación
     if (req.user.role === "preparador") {
       const a = db.findOne("assignments", (x) => x.opositorId === opo.id && x.active);
       if (!a || a.preparadorId !== req.user.id) return res.status(403).json({ error: "forbidden" });
     }
     const enabled = !!req.body?.enabled;
     const updated = db.update("users", (u) => u.id === opo.id, { chatbotEnabled: enabled });
+    const out = { ...updated }; delete out.passwordHash;
+    res.json({ user: out });
+  });
+
+  // El preparador define su modo global de chatbot
+  r.patch("/chat/me/mode", auth.requireRole("preparador"), (req, res) => {
+    const mode = req.body?.mode;
+    if (!CHATBOT_MODES.find((m) => m.id === mode)) return res.status(400).json({ error: "invalid_mode" });
+    const updated = db.update("users", (u) => u.id === req.user.id, { chatbotMode: mode });
     const out = { ...updated }; delete out.passwordHash;
     res.json({ user: out });
   });
@@ -168,7 +287,6 @@ module.exports = function chatRoutes({ env }) {
     if (opositor.commitment?.examName) lines.push(`- Oposición: ${opositor.commitment.examName}`);
     if (opositor.commitment?.examDate) lines.push(`- Fecha objetivo de examen: ${opositor.commitment.examDate}`);
     if (opositor.commitment?.weeklyHours) lines.push(`- Dedicación: ${opositor.commitment.weeklyHours}h/semana`);
-    // Últimos resultados
     const recent = db.find("assessments", (a) => a.opositorId === opositor.id)
       .slice(-3)
       .map((a) => `${a.title} (${a.type}): ${a.score ?? "?"}/${a.maxScore || 10}`);

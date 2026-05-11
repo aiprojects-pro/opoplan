@@ -59,6 +59,7 @@ const preparadorView = (() => {
           <div class="org-badge"><strong>${ui.esc(app.currentUser.name)}</strong>Preparador · ${ui.esc(app.currentUser.email)}</div>
           <nav class="nav">
             <button data-section="dashboard" ${state.section === "dashboard" ? 'class="active"' : ""}>📊 Resumen</button>
+            <button data-section="processes" ${state.section === "processes" ? 'class="active"' : ""}>🎯 Procesos selectivos</button>
             <button data-section="agenda" ${state.section === "agenda" ? 'class="active"' : ""}>📅 Agenda</button>
             <button data-section="availability" ${state.section === "availability" ? 'class="active"' : ""}>🕐 Disponibilidad</button>
             <button data-section="bookings" ${state.section === "bookings" ? 'class="active"' : ""}>👋 Reservas</button>
@@ -67,7 +68,9 @@ const preparadorView = (() => {
             <button data-section="library" ${state.section === "library" ? 'class="active"' : ""}>🗂️ Biblioteca</button>
             <button data-section="corrections" ${state.section === "corrections" ? 'class="active"' : ""}>✏️ Correcciones</button>
             <button data-section="chats" ${state.section === "chats" ? 'class="active"' : ""}>💬 Chats IA</button>
+            <button data-section="challenges" ${state.section === "challenges" ? 'class="active"' : ""}>🏆 Retos</button>
             <button data-section="reports" ${state.section === "reports" ? 'class="active"' : ""}>📄 Informes</button>
+            <button data-section="settings" ${state.section === "settings" ? 'class="active"' : ""}>⚙️ Mis ajustes</button>
           </nav>
           <div class="sidebar-footer"><button class="ghost" id="logout-btn">Cerrar sesión</button></div>
         </aside>
@@ -117,7 +120,10 @@ const preparadorView = (() => {
               <span>${ui.esc(o.examDate || "—")}</span>
               <span>${o.weeklyHours} h</span>
               <span><span class="pill ${o.mastery > 65 ? "success" : o.mastery > 45 ? "warn" : "danger"}">${o.mastery}%</span></span>
-              <span class="actions"><button class="ghost sm" data-prep-report="${ui.esc(o.id)}">Generar informe</button></span>
+              <span class="actions">
+                <button class="ghost sm" data-prep-commitment="${ui.esc(o.id)}">Ver compromiso</button>
+                <button class="ghost sm" data-prep-report="${ui.esc(o.id)}">Generar informe</button>
+              </span>
             </div>`).join("") || `<div class="empty-state">Sin opositores asignados.</div>`}
         </div>
       </div>`;
@@ -357,6 +363,7 @@ const preparadorView = (() => {
         <div class="slot-when">
           <strong>${ui.esc(formatDate(b.date))} · ${ui.esc(b.time)}</strong>
           <small>${b.durationMin || 60} min · ${ui.esc(opositorName(b.opositorId))}${b.notes ? ` · "${ui.esc(b.notes)}"` : ""}</small>
+          ${b.videoJoinUrl ? `<small>📹 <a href="${ui.esc(b.videoHostUrl || b.videoJoinUrl)}" target="_blank" rel="noopener">Iniciar videollamada (${ui.esc(b.videoProvider || "")})</a>${b.videoPasscode ? ` · contraseña <code>${ui.esc(b.videoPasscode)}</code>` : ""}</small>` : ""}
         </div>
         ${b.status === "confirmed"
           ? `<button class="ghost sm" data-cancel-booking="${ui.esc(b.id)}">Cancelar</button>`
@@ -558,6 +565,157 @@ const preparadorView = (() => {
       </div>`;
   }
 
+  // ── Procesos selectivos (transcripción ~20:22) ──────────────────────────
+
+  async function loadProcesses() {
+    try {
+      const [list, q] = await Promise.all([api.processes.list(), api.processes.quota()]);
+      state.processes = list.processes || [];
+      state.quota = q;
+    } catch (e) {
+      state.processes = [];
+      state.quota = null;
+    }
+  }
+
+  function processesSection() {
+    const procs = state.processes || [];
+    const q = state.quota?.quota || {};
+    const usage = state.quota?.usage || {};
+    const statusLabel = (s) => ({ planning: "Planificando", active: "Activo", paused: "En pausa", closed: "Cerrado" }[s] || s);
+    const statusPill = (s) => ({ planning: "muted", active: "success", paused: "warn", closed: "muted" }[s] || "muted");
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Mis convocatorias</p><h1>Procesos selectivos</h1></div>
+        <button class="btn" id="new-process">+ Nuevo proceso</button>
+      </div>
+      <div class="card mb-4">
+        <div class="row">
+          <div>
+            <strong>Plan: ${ui.esc(state.quota?.planName || "—")}</strong>
+            <p class="muted text-sm">Estás usando ${usage.processes || 0} de ${q.maxProcesses || "∞"} procesos · ${usage.opositores || 0} de ${q.maxOpositores || "∞"} opositores.</p>
+          </div>
+          <span class="pill ${(usage.processes || 0) >= (q.maxProcesses || 999) ? "warn" : "success"}">${q.maxProcesses ? Math.round(((usage.processes || 0) / q.maxProcesses) * 100) : 0}%</span>
+        </div>
+      </div>
+      ${procs.length === 0
+        ? `<div class="empty-state">Aún no tienes procesos creados. Crea el primero para asignar opositores y separar tu trabajo.</div>`
+        : `<div class="grid cols-2">${procs.map((p) => `
+          <div class="card">
+            <div class="row">
+              <div>
+                <p class="eyebrow">${ui.esc(p.organism || "Sin organismo")}</p>
+                <h3>${ui.esc(p.name)}</h3>
+                <small class="muted">${ui.esc(p.examName || "—")} · Examen: ${ui.esc(p.examDate || "—")}</small>
+              </div>
+              <span class="pill ${statusPill(p.status)}">${statusLabel(p.status)}</span>
+            </div>
+            <p style="margin: 10px 0;">${ui.esc(p.description || "")}</p>
+            <div class="row mt-3">
+              <span class="pill">${p.opositoresCount || 0} opositor${p.opositoresCount === 1 ? "" : "es"}</span>
+              <div class="actions">
+                <button class="ghost sm" data-edit-process="${p.id}">Editar</button>
+                <button class="ghost sm" data-delete-process="${p.id}">Borrar</button>
+              </div>
+            </div>
+          </div>`).join("")}</div>`}`;
+  }
+
+  // ── Retos / rankings (transcripción ~20:26) ─────────────────────────────
+
+  async function loadChallenges() {
+    try {
+      const r = await api.challenges.list();
+      state.challenges = r.challenges || [];
+    } catch (e) {
+      state.challenges = [];
+    }
+  }
+
+  function challengesSection() {
+    const list = state.challenges || [];
+    const statusLabel = (s) => ({ draft: "Borrador", open: "Abierto", closed: "Cerrado" }[s] || s);
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Competición</p><h1>Retos y rankings</h1></div>
+        <button class="btn" id="new-challenge">+ Nuevo reto</button>
+      </div>
+      <p class="muted mb-4">Los opositores que activan el ranking en su perfil pueden participar. Los demás no aparecen.</p>
+      ${list.length === 0
+        ? `<div class="empty-state">Aún no has creado ningún reto.</div>`
+        : `<div class="grid cols-2">${list.map((c) => `
+          <div class="card">
+            <div class="row">
+              <h3>${ui.esc(c.name)}</h3>
+              <span class="pill ${c.status === "open" ? "success" : "muted"}">${statusLabel(c.status)}</span>
+            </div>
+            <p>${ui.esc(c.description || "")}</p>
+            <small class="muted">${(c.questions || []).length} pregunta${(c.questions || []).length === 1 ? "" : "s"} · ${Math.round((c.durationSec || 0) / 60)} min</small>
+            <div class="row mt-3">
+              <button class="ghost sm" data-ranking="${c.id}">Ver ranking</button>
+              <div class="actions">
+                <button class="ghost sm" data-edit-challenge="${c.id}">Editar</button>
+                <button class="ghost sm" data-delete-challenge="${c.id}">Borrar</button>
+              </div>
+            </div>
+          </div>`).join("")}</div>`}`;
+  }
+
+  // ── Ajustes del preparador (transcripción ~20:18, ~20:30) ───────────────
+
+  function settingsSection() {
+    const u = app.currentUser || {};
+    const ai = u.ai || {};
+    const cb = u.chatbotMode || "supervised";
+    const inact = u.inactivitySettings || { preset: "normal" };
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Mi cuenta</p><h1>Mis ajustes</h1></div>
+      </div>
+
+      <form class="form" id="settings-form">
+        <div class="card mb-4">
+          <h3>🤖 Modo del chatbot</h3>
+          <p class="muted text-sm mb-3">Define cómo responde el chatbot a tus opositores. Solo afecta a los opositores asignados a ti.</p>
+          <label><input type="radio" name="chatbotMode" value="off" ${cb === "off" ? "checked" : ""}/> <strong>Desactivado</strong> — No hay chatbot. Las dudas se contestan manualmente.</label>
+          <label><input type="radio" name="chatbotMode" value="supervised" ${cb === "supervised" ? "checked" : ""}/> <strong>Supervisado</strong> — Las preguntas llegan a ti, tú decides si responde la IA o tú.</label>
+          <label><input type="radio" name="chatbotMode" value="auto_general" ${cb === "auto_general" ? "checked" : ""}/> <strong>Automático general</strong> — La IA contesta dudas generales. Las específicas del temario te llegan a ti.</label>
+          <label><input type="radio" name="chatbotMode" value="auto_full" ${cb === "auto_full" ? "checked" : ""}/> <strong>Automático completo</strong> — La IA contesta todo. Solo se te avisa de las críticas.</label>
+        </div>
+
+        <div class="card mb-4">
+          <h3>⏰ Aviso por inactividad</h3>
+          <p class="muted text-sm mb-3">Cuándo enviar un email automático al opositor que no entra a la plataforma.</p>
+          <label>Preset
+            <select name="inactivityPreset">
+              <option value="intensive" ${inact.preset === "intensive" ? "selected" : ""}>Intensivo — 2 días (cuando queda poco para el examen)</option>
+              <option value="normal" ${inact.preset === "normal" ? "selected" : ""}>Normal — 7 días</option>
+              <option value="calm" ${inact.preset === "calm" ? "selected" : ""}>Tranquilo — 15 días (preparación de larga duración)</option>
+              <option value="off" ${inact.preset === "off" ? "selected" : ""}>Desactivado</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="card mb-4">
+          <h3>🧠 Mi IA personal (opcional)</h3>
+          <p class="muted text-sm mb-3">Si conectas tu propia IA, se usará para tus respuestas en lugar de la de la academia. El coste lo asumes tú.</p>
+          <label class="text-sm"><input type="checkbox" name="ai.enabled" ${ai.enabled ? "checked" : ""}/> Usar mi IA personal</label>
+          <label>Proveedor
+            <select name="ai.provider">
+              <option value="">— Ninguno</option>
+              <option value="gemini" ${ai.provider === "gemini" ? "selected" : ""}>Google Gemini</option>
+              <option value="openai" ${ai.provider === "openai" ? "selected" : ""}>OpenAI (ChatGPT)</option>
+              <option value="anthropic" ${ai.provider === "anthropic" ? "selected" : ""}>Anthropic (Claude)</option>
+            </select>
+          </label>
+          <label>API key<input type="password" name="ai.apiKey" placeholder="${ai.apiKey === "********" ? "Configurada (deja vacío para mantener)" : "Pega tu API key aquí"}" /></label>
+          <label>Modelo<input name="ai.model" value="${ui.esc(ai.model || "")}" placeholder="p.ej. gemini-1.5-flash, gpt-4o-mini, claude-haiku-4-5" /></label>
+        </div>
+
+        <div class="row mt-4"><span></span><button class="btn" type="submit">Guardar ajustes</button></div>
+      </form>`;
+  }
+
   // ── Render + bindings (extendidos) ──────────────────────────────────────
 
   function render() {
@@ -571,6 +729,9 @@ const preparadorView = (() => {
     else if (state.section === "corrections") content = correctionsSection();
     else if (state.section === "chats") content = chatsSupervisionSection();
     else if (state.section === "reports") content = reportsSection();
+    else if (state.section === "processes") content = processesSection();
+    else if (state.section === "challenges") content = challengesSection();
+    else if (state.section === "settings") content = settingsSection();
     ui.root().innerHTML = shell(content);
     bind();
     if (state.section === "agenda") mountCalendar();
@@ -600,6 +761,9 @@ const preparadorView = (() => {
         else if (state.section === "corrections") { await loadCorrections(); await loadAgendaData(); }
         else if (state.section === "chats") { await loadChatsSupervision(); await loadAgendaData(); }
         else if (state.section === "reports") { await loadReports(); await loadAgendaData(); }
+        else if (state.section === "processes") await loadProcesses();
+        else if (state.section === "challenges") await loadChallenges();
+        else if (state.section === "settings") { /* usa app.currentUser */ }
         render();
       };
     });
@@ -743,6 +907,98 @@ const preparadorView = (() => {
       state.lastReport = null;
       render();
     });
+
+    // ── Compromiso del opositor (~20:38) ────────────────────────────────────
+    document.querySelectorAll("[data-prep-commitment]").forEach((b) => {
+      b.onclick = async () => {
+        const id = b.dataset.prepCommitment;
+        try {
+          const c = await api.preparadorMe.commitmentOf(id);
+          openCommitmentModal(c);
+        } catch (e) { ui.toast(e.error || "Error", "error"); }
+      };
+    });
+
+    // ── Procesos selectivos ─────────────────────────────────────────────────
+    document.getElementById("new-process")?.addEventListener("click", () => openProcessModal(null));
+    document.querySelectorAll("[data-edit-process]").forEach((b) => {
+      const p = (state.processes || []).find((x) => x.id === b.dataset.editProcess);
+      b.onclick = () => openProcessModal(p);
+    });
+    document.querySelectorAll("[data-delete-process]").forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm("¿Borrar este proceso? Si tiene opositores deberás reasignarlos.")) return;
+        try {
+          await api.processes.delete(b.dataset.deleteProcess);
+          ui.toast("Proceso borrado", "success");
+          await loadProcesses(); render();
+        } catch (e) {
+          if (e.status === 409 && e.error === "has_opositores") {
+            if (confirm(`El proceso tiene ${e.count} opositor${e.count === 1 ? "" : "es"} asignado${e.count === 1 ? "" : "s"}. ¿Forzar borrado igualmente?`)) {
+              await api.processes.delete(b.dataset.deleteProcess, true);
+              await loadProcesses(); render();
+            }
+          } else {
+            ui.toast(e.error || "Error", "error");
+          }
+        }
+      };
+    });
+
+    // ── Retos / rankings ────────────────────────────────────────────────────
+    document.getElementById("new-challenge")?.addEventListener("click", () => openChallengeModal(null));
+    document.querySelectorAll("[data-edit-challenge]").forEach((b) => {
+      const c = (state.challenges || []).find((x) => x.id === b.dataset.editChallenge);
+      b.onclick = () => openChallengeModal(c);
+    });
+    document.querySelectorAll("[data-delete-challenge]").forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm("¿Borrar este reto? Se perderán los intentos registrados.")) return;
+        try {
+          await api.challenges.delete(b.dataset.deleteChallenge);
+          ui.toast("Reto borrado", "success");
+          await loadChallenges(); render();
+        } catch (e) { ui.toast(e.error || "Error", "error"); }
+      };
+    });
+    document.querySelectorAll("[data-ranking]").forEach((b) => {
+      b.onclick = async () => {
+        try {
+          const r = await api.challenges.ranking(b.dataset.ranking);
+          openRankingModal(r);
+        } catch (e) { ui.toast(e.error || "Error", "error"); }
+      };
+    });
+
+    // ── Mis ajustes ─────────────────────────────────────────────────────────
+    const settingsForm = document.getElementById("settings-form");
+    if (settingsForm) {
+      settingsForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(settingsForm);
+        const ai = {
+          enabled: settingsForm.elements["ai.enabled"].checked,
+          provider: fd.get("ai.provider") || "",
+          model: fd.get("ai.model") || "",
+        };
+        const newKey = fd.get("ai.apiKey");
+        if (newKey) ai.apiKey = newKey;
+        try {
+          await api.preparadorMe.update({
+            chatbotMode: fd.get("chatbotMode"),
+            inactivitySettings: { preset: fd.get("inactivityPreset") },
+            ai,
+          });
+          ui.toast("Ajustes guardados", "success");
+          // Refrescar /me para ver el nuevo estado
+          const me = await api.auth.me();
+          app.currentUser = me.user;
+          render();
+        } catch (err) {
+          ui.toast(err.error || "Error", "error");
+        }
+      };
+    }
   }
 
   function openEventModal(ev, isNew = false) {
@@ -861,11 +1117,14 @@ const preparadorView = (() => {
       title: "Publicar hueco de tutoría",
       body: `
         <form class="form" id="slot-form">
-          <p class="muted text-sm">Define un hueco recurrente. Los opositores asignados podrán reservarlo.</p>
-          <label>Día de la semana
-            <select name="dayOfWeek" required>
-              ${DOW_OPTS.map((d) => `<option value="${d.v}">${d.label}</option>`).join("")}
-            </select>
+          <p class="muted text-sm">Define uno o varios huecos recurrentes con el mismo horario.</p>
+          <label>Días de la semana <span class="help">(puedes seleccionar varios)</span>
+            <div class="grid cols-7" style="gap:6px;">
+              ${DOW_OPTS.map((d) => `
+                <label class="text-sm" style="display:flex;align-items:center;gap:4px;background:var(--surface, #f5f7fb);padding:6px;border-radius:6px;cursor:pointer;">
+                  <input type="checkbox" name="dayOfWeeks" value="${d.v}" /> ${d.label.slice(0, 3)}
+                </label>`).join("")}
+            </div>
           </label>
           <div class="grid cols-2">
             <label>Hora<input type="time" name="time" required value="17:00" /></label>
@@ -885,13 +1144,16 @@ const preparadorView = (() => {
     });
     m.el.querySelector("#save-slot").onclick = async () => {
       const fd = new FormData(m.el.querySelector("#slot-form"));
+      const days = fd.getAll("dayOfWeeks").map((d) => Number(d));
+      if (!days.length) { ui.toast("Selecciona al menos un día", "warn"); return; }
       try {
         await api.common.createAvailability({
-          dayOfWeek: Number(fd.get("dayOfWeek")), time: fd.get("time"),
+          dayOfWeeks: days,
+          time: fd.get("time"),
           durationMin: Number(fd.get("durationMin")) || 60,
           recurrence: fd.get("recurrence") || "weekly", until: fd.get("until") || "",
         });
-        ui.toast("Hueco publicado", "success");
+        ui.toast(`Publicado${days.length > 1 ? "s" : ""} ${days.length} hueco${days.length > 1 ? "s" : ""}`, "success");
         m.close();
         await loadAvailability(); render();
       } catch (e) { ui.toast(e.error || "Error", "error"); }
@@ -1152,6 +1414,17 @@ const preparadorView = (() => {
           </div>
           <label>Instrucciones<textarea name="instructions" rows="3">${ui.esc(correction?.instructions || "")}</textarea></label>
 
+          <h3 class="mt-3" style="font-size:0.95rem;">Adjuntos a las instrucciones</h3>
+          <p class="help">PDF, imagen o cualquier archivo de apoyo. Los verá el opositor junto al enunciado.</p>
+          <div id="instr-files">${(correction?.instructionFiles || []).map((f) => `
+            <div class="file-pill" data-instr-file="${f.id}">
+              <div class="icon">${ui.fileIcon(null, f.contentType, f.name)}</div>
+              <div class="meta"><strong>${ui.esc(f.name)}</strong><small>${ui.formatBytes(f.size || 0)}</small></div>
+              <a class="ghost sm" href="${ui.esc(f.downloadUrl || "")}" target="_blank">Abrir</a>
+              <button type="button" class="ghost sm" data-remove-instr="${f.id}">Quitar</button>
+            </div>`).join("")}</div>
+          <div id="instr-dz"></div>
+
           <h3 class="mt-3" style="font-size:0.95rem;">Rúbrica de evaluación</h3>
           <p class="help">Pesos en porcentaje. La nota total se calcula automáticamente sobre 10.</p>
           <div id="rubric-list">${renderRubric()}</div>
@@ -1210,6 +1483,34 @@ const preparadorView = (() => {
     }
     bindRubricRows();
 
+    // Instrucciones: adjuntos (transcripción ~20:21)
+    let instructionFileIds = (correction?.instructionFiles || []).map((f) => f.id);
+    const dzEl = m.el.querySelector("#instr-dz");
+    if (dzEl) {
+      const dz = ui.dropzone({
+        title: "Adjuntar archivo",
+        hint: "Arrastra aquí o pulsa para añadir",
+        accept: "*",
+        multiple: true,
+        onUpload: async (f) => api.files.upload(f, "correction"),
+        onComplete: (res) => {
+          if (res?.file?.id) {
+            instructionFileIds.push(res.file.id);
+          }
+        },
+      });
+      dzEl.innerHTML = dz.html("instr-dz-zone");
+      dz.bind(dzEl.querySelector("#instr-dz-zone"));
+    }
+    m.el.querySelectorAll("[data-remove-instr]").forEach((b) => {
+      b.onclick = () => {
+        const id = b.dataset.removeInstr;
+        instructionFileIds = instructionFileIds.filter((x) => x !== id);
+        const pill = m.el.querySelector(`[data-instr-file="${id}"]`);
+        if (pill) pill.remove();
+      };
+    });
+
     m.el.querySelector("#add-rb").onclick = () => {
       rubric.push({ id: db_id("rb"), name: "Nuevo criterio", weight: 0, max: 10 });
       refreshRubric();
@@ -1222,6 +1523,7 @@ const preparadorView = (() => {
         title: fd.get("title"),
         dueDate: fd.get("dueDate") || "",
         instructions: fd.get("instructions") || "",
+        instructionFileIds,
         rubric,
       };
       try {
@@ -1289,6 +1591,175 @@ const preparadorView = (() => {
   }
 
   function db_id(prefix) { return `${prefix}_${Math.random().toString(36).slice(2, 10)}`; }
+
+  // ── Modal: ver compromiso del opositor (~20:38) ───────────────────────────
+
+  function openCommitmentModal(c) {
+    const o = c.opositor || {};
+    const com = c.commitment || {};
+    const habits = c.habits || [];
+    const plan = c.plan || {};
+    const last7 = habits.slice(-7);
+    const ui_ = ui;
+    ui.modal({
+      title: `Compromiso de ${o.name || ""}`,
+      body: `
+        <div class="grid cols-2">
+          <div>
+            <h3>Datos del opositor</h3>
+            <p><strong>${ui_.esc(o.name || "")}</strong><br/><small class="muted">${ui_.esc(o.email || "")} · ${ui_.esc(o.phone || "—")}</small></p>
+            <h3 class="mt-4">Compromiso declarado</h3>
+            <p><strong>Examen:</strong> ${ui_.esc(com.examName || "—")} (${ui_.esc(com.examDate || "—")})</p>
+            <p><strong>Horas semanales:</strong> ${com.weeklyHours || 0} h · <strong>Diarias:</strong> ${com.dailyHours || 0} h</p>
+            <p><strong>Días activos:</strong> ${(com.activeDays || []).join(", ") || "—"}</p>
+            <p><strong>Días de descanso:</strong> ${(com.restDays || []).join(", ") || "—"}</p>
+          </div>
+          <div>
+            <h3>Estado</h3>
+            ${c.brokenStreak >= 3 ? `<div class="card" style="border-color:var(--danger,#c73c3c);background:rgba(199,60,60,0.08);"><strong>⚠️ Compromiso roto</strong><br/><small>Lleva ${c.brokenStreak} día${c.brokenStreak === 1 ? "" : "s"} sin cumplir.</small></div>` : `<div class="pill success">Cumplimiento OK (${c.brokenStreak} días sin cumplir)</div>`}
+            <p class="mt-4"><strong>Plan personalizado:</strong> ${plan.doneTasks || 0} / ${plan.totalTasks || 0} tareas hechas</p>
+            <h3 class="mt-4">Últimos 7 días</h3>
+            <div class="table">
+              <div class="table-row header"><span>Fecha</span><span>Horas</span><span>Cumplió</span></div>
+              ${last7.length === 0 ? `<div class="empty-state">Sin registros</div>` : last7.map((h) => `
+                <div class="table-row">
+                  <span>${ui_.esc(h.date || "")}</span>
+                  <span>${h.hours || 0} h</span>
+                  <span><span class="pill ${h.planCompliance === "full" ? "success" : h.planCompliance === "partial" ? "warn" : "danger"}">${h.planCompliance || "—"}</span></span>
+                </div>`).join("")}
+            </div>
+          </div>
+        </div>`,
+      footer: `<button class="ghost" data-close>Cerrar</button>`,
+    });
+  }
+
+  // ── Modal: nuevo / editar proceso selectivo ───────────────────────────────
+
+  function openProcessModal(proc) {
+    const isNew = !proc;
+    const m = ui.modal({
+      title: isNew ? "Nuevo proceso selectivo" : `Editar ${proc.name}`,
+      body: `
+        <form class="form" id="proc-form">
+          <label>Nombre interno<input name="name" required value="${ui.esc(proc?.name || "")}" placeholder="p.ej. Auxiliar Admvo. 2026" /></label>
+          <div class="grid cols-2">
+            <label>Examen<input name="examName" value="${ui.esc(proc?.examName || "")}" /></label>
+            <label>Fecha<input type="date" name="examDate" value="${ui.esc(proc?.examDate || "")}" /></label>
+          </div>
+          <div class="grid cols-2">
+            <label>Organismo<input name="organism" value="${ui.esc(proc?.organism || "")}" /></label>
+            <label>Nivel / grupo<input name="level" value="${ui.esc(proc?.level || "")}" /></label>
+          </div>
+          <label>Estado
+            <select name="status">
+              <option value="planning" ${proc?.status === "planning" ? "selected" : ""}>Planificando</option>
+              <option value="active" ${proc?.status === "active" ? "selected" : ""}>Activo</option>
+              <option value="paused" ${proc?.status === "paused" ? "selected" : ""}>En pausa</option>
+              <option value="closed" ${proc?.status === "closed" ? "selected" : ""}>Cerrado</option>
+            </select>
+          </label>
+          <label>Descripción<textarea name="description" rows="3">${ui.esc(proc?.description || "")}</textarea></label>
+        </form>`,
+      footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="save">${isNew ? "Crear" : "Guardar"}</button>`,
+    });
+    m.el.querySelector("#save").onclick = async () => {
+      const fd = new FormData(m.el.querySelector("#proc-form"));
+      const data = {
+        name: fd.get("name"),
+        examName: fd.get("examName"),
+        examDate: fd.get("examDate"),
+        organism: fd.get("organism"),
+        level: fd.get("level"),
+        status: fd.get("status"),
+        description: fd.get("description"),
+      };
+      try {
+        if (isNew) await api.processes.create(data);
+        else await api.processes.update(proc.id, data);
+        ui.toast("Proceso guardado", "success");
+        m.close();
+        await loadProcesses(); render();
+      } catch (err) {
+        if (err.status === 409 && err.error === "quota_exceeded") {
+          ui.toast(`Has llegado al límite de tu plan (${err.quota} procesos). Mejora tu plan para crear más.`, "warn");
+        } else {
+          ui.toast(err.error || "Error", "error");
+        }
+      }
+    };
+  }
+
+  // ── Modal: nuevo / editar reto ───────────────────────────────────────────
+
+  function openChallengeModal(ch) {
+    const isNew = !ch;
+    const m = ui.modal({
+      title: isNew ? "Nuevo reto" : `Editar ${ch.name}`,
+      body: `
+        <form class="form" id="ch-form">
+          <label>Nombre<input name="name" required value="${ui.esc(ch?.name || "")}" /></label>
+          <label>Descripción<textarea name="description" rows="2">${ui.esc(ch?.description || "")}</textarea></label>
+          <div class="grid cols-2">
+            <label>Duración (minutos)<input type="number" min="1" name="durationMin" value="${Math.round((ch?.durationSec || 600) / 60)}" /></label>
+            <label>Estado
+              <select name="status">
+                <option value="draft" ${ch?.status === "draft" ? "selected" : ""}>Borrador</option>
+                <option value="open" ${ch?.status === "open" ? "selected" : ""}>Abierto</option>
+                <option value="closed" ${ch?.status === "closed" ? "selected" : ""}>Cerrado</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted text-sm">Pega las preguntas en formato JSON: <code>[{"q":"...","options":["A","B","C"],"correct":0}]</code></p>
+          <label>Preguntas (JSON)<textarea name="questions" rows="8" style="font-family:monospace;font-size:12px;">${ui.esc(JSON.stringify(ch?.questions || [], null, 2))}</textarea></label>
+        </form>`,
+      footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="save">${isNew ? "Crear" : "Guardar"}</button>`,
+    });
+    m.el.querySelector("#save").onclick = async () => {
+      const fd = new FormData(m.el.querySelector("#ch-form"));
+      let questions = [];
+      try { questions = JSON.parse(fd.get("questions") || "[]"); }
+      catch { ui.toast("JSON de preguntas inválido", "error"); return; }
+      const data = {
+        name: fd.get("name"),
+        description: fd.get("description"),
+        durationSec: (Number(fd.get("durationMin")) || 10) * 60,
+        status: fd.get("status"),
+        questions,
+      };
+      try {
+        if (isNew) await api.challenges.create(data);
+        else await api.challenges.update(ch.id, data);
+        ui.toast("Reto guardado", "success");
+        m.close();
+        await loadChallenges(); render();
+      } catch (err) {
+        ui.toast(err.error || "Error", "error");
+      }
+    };
+  }
+
+  // ── Modal: ver ranking ───────────────────────────────────────────────────
+
+  function openRankingModal(data) {
+    const ranking = data.ranking || [];
+    ui.modal({
+      title: `Ranking: ${data.challenge?.name || ""}`,
+      body: `
+        <div class="table">
+          <div class="table-row header"><span>#</span><span>Opositor</span><span>Aciertos</span><span>Tiempo</span><span>Puntuación</span></div>
+          ${ranking.length === 0 ? `<div class="empty-state">Aún no hay intentos.</div>` : ranking.map((r) => `
+            <div class="table-row">
+              <span><strong>#${r.position}</strong></span>
+              <span>${ui.esc(r.opositorName)}</span>
+              <span>${r.correct}/${r.total}</span>
+              <span>${Math.round(r.durationSec / 60)} min</span>
+              <span><strong>${r.score}</strong></span>
+            </div>`).join("")}
+        </div>`,
+      footer: `<button class="ghost" data-close>Cerrar</button>`,
+    });
+  }
 
   return {
     show: async () => {

@@ -1,23 +1,19 @@
 const express = require("express");
-const crypto = require("crypto");
 const db = require("../lib/db");
 const auth = require("../middleware/auth");
-
-function hash(password) {
-  return crypto.createHash("sha256").update(`opoplan:${password}`).digest("hex");
-}
+const passwords = require("../lib/passwords");
+const { PLAN_LINES } = require("../lib/constants");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // API del super-administrador. Solo accesible para users.role === "superadmin".
-//   - GET    /api/superadmin/dashboard          → métricas globales
-//   - GET    /api/superadmin/organizations
-//   - POST   /api/superadmin/organizations      → alta de academia + admin
-//   - PATCH  /api/superadmin/organizations/:id  → editar academia
-//   - DELETE /api/superadmin/organizations/:id  → desactivar academia
-//   - GET    /api/superadmin/plans              → planes globales
-//   - POST   /api/superadmin/plans              → crear plan global
-//   - PATCH  /api/superadmin/plans/:id          → editar plan global
-//   - DELETE /api/superadmin/plans/:id          → desactivar plan global
+//
+// Mejoras incorporadas de la conversación de revisión:
+//   - El dashboard muestra TODOS los roles correctamente (~20:08): admin,
+//     preparador, opositor, suscripciones activas reales (no solo opositores).
+//   - Los planes incluyen el conteo de suscripciones activas y el estado de
+//     "borrable" (~20:05): si un plan tiene suscriptores, no se puede eliminar.
+//   - Los planes se clasifican por línea (oposiciones, universidad, EBAU,
+//     preparador independiente) — transcripción ~19:57.
 // ─────────────────────────────────────────────────────────────────────────────
 
 module.exports = function superadminRoutes() {
@@ -37,20 +33,34 @@ module.exports = function superadminRoutes() {
       return acc;
     }, {});
 
+    // Bug detectado en la conversación (~20:08): hay que mostrar también el
+    // administrador como suscripción activa (porque la academia sí está activa)
+    // y reflejar correctamente cuantas suscripciones activas tiene cada org.
     const revenueByOrg = subs.reduce((acc, s) => {
       acc[s.organizationId] = (acc[s.organizationId] || 0) + (Number(s.amount) || 0);
       return acc;
     }, {});
 
-    const orgSummary = orgs.map((o) => ({
-      id: o.id,
-      name: o.name,
-      slug: o.slug,
-      status: o.status,
-      users: users.filter((u) => u.organizationId === o.id).length,
-      activeSubs: subs.filter((s) => s.organizationId === o.id).length,
-      monthlyRevenue: revenueByOrg[o.id] || 0,
-    }));
+    const orgSummary = orgs.map((o) => {
+      const orgUsers = users.filter((u) => u.organizationId === o.id);
+      const orgSubs = subs.filter((s) => s.organizationId === o.id);
+      return {
+        id: o.id,
+        name: o.name,
+        slug: o.slug,
+        status: o.status,
+        type: o.type || "academia",
+        users: orgUsers.length,
+        admins: orgUsers.filter((u) => u.role === "admin").length,
+        preparadores: orgUsers.filter((u) => u.role === "preparador").length,
+        opositores: orgUsers.filter((u) => u.role === "opositor").length,
+        // Suscripciones activas de la organización.
+        // Si la academia está activa la contamos como "academia activa".
+        activeSubs: orgSubs.length,
+        academyActive: o.status === "active",
+        monthlyRevenue: revenueByOrg[o.id] || 0,
+      };
+    });
 
     res.json({
       totals: {
@@ -61,10 +71,15 @@ module.exports = function superadminRoutes() {
         preparadores: usersByRole.preparador || 0,
         opositores: usersByRole.opositor || 0,
         activeSubscriptions: subs.length,
+        // El total que se ve arriba en el panel ahora suma:
+        // suscripciones reales + academias activas (que también pagan).
+        totalActiveAccounts: subs.length + orgs.filter((o) => o.status === "active").length,
         monthlyRevenue: subs.reduce((a, s) => a + (Number(s.amount) || 0), 0),
         plansAvailable: plans.filter((p) => p.active).length,
       },
       organizations: orgSummary,
+      // Catálogo de líneas de planes para que el UI pueda filtrar
+      planLines: PLAN_LINES,
     });
   });
 
@@ -83,7 +98,7 @@ module.exports = function superadminRoutes() {
 
   // Crear academia + administrador inicial
   r.post("/organizations", (req, res) => {
-    const { name, slug, adminName, adminEmail, adminPassword, branding, contact, billing } = req.body || {};
+    const { name, slug, type, adminName, adminEmail, adminPassword, branding, contact, billing } = req.body || {};
     if (!name || !slug || !adminEmail || !adminPassword) {
       return res.status(400).json({ error: "missing_fields" });
     }
@@ -104,6 +119,7 @@ module.exports = function superadminRoutes() {
       name,
       slug: cleanSlug,
       status: "active",
+      type: type === "preparador_independiente" ? "preparador_independiente" : "academia",
       createdAt: new Date().toISOString().slice(0, 10),
       branding: {
         tagline: branding?.tagline || "",
@@ -122,8 +138,16 @@ module.exports = function superadminRoutes() {
         storage: { enabled: false, provider: "r2", bucket: "", endpoint: "", accessKeyId: "", secretAccessKey: "" },
         ai: { enabled: false, provider: "gemini", apiKey: "", model: "gemini-1.5-flash" },
         moodle: { enabled: false, baseUrl: "", clientId: "", clientSecret: "" },
+        videoconference: { enabled: false, provider: "zoom", account: "", baseUrl: "" },
         redsys: { enabled: false, merchantCode: "", terminal: "1", secretKey: "", environment: "sandbox" },
         legal: { privacyUrl: "", termsUrl: "", dataController: "", supportEmail: "" },
+      },
+      globalPlanOverrides: {},
+      nps: { enabled: false, template: "nps_classic", frequency: "monthly", customQuestions: [] },
+      defaults: {
+        inactivityReminder: { preset: "normal", days: 7 },
+        brokenCommitmentEmail: { enabled: true, daysInARow: 3 },
+        unconsumedTutoringEmail: { enabled: true },
       },
     });
 
@@ -135,7 +159,7 @@ module.exports = function superadminRoutes() {
       email: adminEmail,
       phone: "",
       photo: "",
-      passwordHash: hash(adminPassword),
+      passwordHash: passwords.hash(adminPassword),
       status: "active",
     });
 
@@ -165,17 +189,27 @@ module.exports = function superadminRoutes() {
 
   // ── Planes globales ────────────────────────────────────────────────────────
 
+  // GET /plans incluye conteo de suscriptores activos por plan y si es borrable
+  // (~20:05): "si tiene 0 personas lo puedo borrar; si tiene 3 personas no".
   r.get("/plans", (req, res) => {
-    res.json({ plans: db.find("subscriptionPlans", (p) => p.scope === "global") });
+    const plans = db.find("subscriptionPlans", (p) => p.scope === "global");
+    const subs = db.find("subscriptions", (s) => s.status === "active");
+    const enriched = plans.map((p) => ({
+      ...p,
+      activeSubscribers: subs.filter((s) => s.planId === p.id).length,
+      deletable: subs.filter((s) => s.planId === p.id).length === 0,
+    }));
+    res.json({ plans: enriched, lines: PLAN_LINES });
   });
 
   r.post("/plans", (req, res) => {
-    const { name, target, price, currency, period, trialDays, features, active } = req.body || {};
+    const { name, line, target, price, currency, period, trialDays, features, active, quota } = req.body || {};
     if (!name || price == null) return res.status(400).json({ error: "missing_fields" });
     const plan = db.insert("subscriptionPlans", {
       id: db.id("plan"),
       scope: "global",
       organizationId: null,
+      line: line || "oposiciones",
       name,
       target: target || "opositor",
       price: Number(price),
@@ -184,6 +218,7 @@ module.exports = function superadminRoutes() {
       trialDays: Number(trialDays) || 0,
       features: Array.isArray(features) ? features : [],
       active: active !== false,
+      quota: quota || null,
     });
     res.json({ plan });
   });
@@ -198,14 +233,21 @@ module.exports = function superadminRoutes() {
     res.json({ plan: updated });
   });
 
+  // DELETE protegido (~20:05): si tiene suscriptores activos rechazamos.
   r.delete("/plans/:id", (req, res) => {
-    const updated = db.update(
-      "subscriptionPlans",
-      (p) => p.id === req.params.id && p.scope === "global",
-      { active: false },
-    );
-    if (!updated) return res.status(404).json({ error: "not_found" });
-    res.json({ ok: true });
+    const plan = db.findOne("subscriptionPlans", (p) => p.id === req.params.id && p.scope === "global");
+    if (!plan) return res.status(404).json({ error: "not_found" });
+    const activeSubs = db.find("subscriptions", (s) => s.status === "active" && s.planId === plan.id);
+    if (req.query.force !== "true" && activeSubs.length > 0) {
+      return res.status(409).json({
+        error: "has_active_subscribers",
+        activeSubscribers: activeSubs.length,
+        message: `Este plan tiene ${activeSubs.length} suscriptores activos. Desactívalo en lugar de borrarlo, o usa ?force=true para forzar.`,
+      });
+    }
+    // En caso de no tener suscriptores: marca como inactivo (no borrado físico)
+    const updated = db.update("subscriptionPlans", (p) => p.id === plan.id, { active: false });
+    res.json({ ok: true, plan: updated });
   });
 
   return r;

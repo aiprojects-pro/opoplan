@@ -2,14 +2,16 @@ const express = require("express");
 const db = require("../lib/db");
 const auth = require("../middleware/auth");
 const notifications = require("../services/notifications");
+const videoconferenceService = require("../services/videoconference");
 const { expandEvents, expandAvailability, fmtDate, parseDate, addDays } = require("../lib/recurrence");
+const { BOOKING_CANCEL_HOURS } = require("../lib/constants");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Rutas compartidas por todos los roles autenticados (admin, preparador,
 // opositor). Todas filtran por organización del usuario.
 // ─────────────────────────────────────────────────────────────────────────────
 
-module.exports = function commonRoutes({ appUrl } = {}) {
+module.exports = function commonRoutes({ appUrl, videoconference: globalVc } = {}) {
   const r = express.Router();
   r.use(auth.requireAuth);
 
@@ -195,13 +197,17 @@ module.exports = function commonRoutes({ appUrl } = {}) {
 
   r.post("/availability", auth.requireRole("preparador", "admin", "superadmin"), (req, res) => {
     const orgId = orgOf(req);
-    const { dayOfWeek, time, durationMin, recurrence, until, slotsPerWindow } = req.body || {};
-    if (dayOfWeek === undefined || !time) return res.status(400).json({ error: "missing_fields" });
-    const slot = db.insert("availability", {
+    const { dayOfWeek, dayOfWeeks, time, durationMin, recurrence, until, slotsPerWindow } = req.body || {};
+    // Permite enviar un array `dayOfWeeks` (varios días con mismo horario, transcripción ~20:13)
+    const days = Array.isArray(dayOfWeeks) && dayOfWeeks.length
+      ? dayOfWeeks.map((d) => Number(d))
+      : (dayOfWeek !== undefined ? [Number(dayOfWeek)] : []);
+    if (!days.length || !time) return res.status(400).json({ error: "missing_fields" });
+    const created = days.map((d) => db.insert("availability", {
       id: db.id("av"),
       organizationId: orgId,
       preparadorId: req.user.role === "preparador" ? req.user.id : (req.body.preparadorId || null),
-      dayOfWeek: Number(dayOfWeek),
+      dayOfWeek: d,
       time,
       durationMin: Number(durationMin) || 60,
       slotsPerWindow: Number(slotsPerWindow) || 1,
@@ -209,8 +215,8 @@ module.exports = function commonRoutes({ appUrl } = {}) {
       until: until || "",
       active: true,
       createdAt: new Date().toISOString(),
-    });
-    res.json({ availability: slot });
+    }));
+    res.json({ availability: created.length === 1 ? created[0] : null, slots: created });
   });
 
   r.delete("/availability/:id", auth.requireRole("preparador", "admin", "superadmin"), (req, res) => {
@@ -235,7 +241,7 @@ module.exports = function commonRoutes({ appUrl } = {}) {
   });
 
   // El opositor reserva un hueco concreto (availabilityId + date)
-  r.post("/bookings", auth.requireRole("opositor", "admin", "superadmin"), (req, res) => {
+  r.post("/bookings", auth.requireRole("opositor", "admin", "superadmin"), async (req, res) => {
     const orgId = orgOf(req);
     const { availabilityId, date, time, notes } = req.body || {};
     if (!availabilityId || !date) return res.status(400).json({ error: "missing_fields" });
@@ -253,6 +259,32 @@ module.exports = function commonRoutes({ appUrl } = {}) {
     const opositorId = req.user.role === "opositor" ? req.user.id : req.body.opositorId;
     const opositor = db.findOne("users", (u) => u.id === opositorId);
     const preparador = db.findOne("users", (u) => u.id === slot.preparadorId);
+    const org = db.findOne("organizations", (o) => o.id === orgId);
+
+    const bookingTime = time || slot.time;
+    const durationMin = slot.durationMin || 60;
+
+    // ── Generar enlace de videoconferencia (~20:11) ──────────────────────────
+    // Si la academia tiene videoconferencia configurada usamos la suya, si no
+    // la global de la plataforma (o mock). Si todo falla, seguimos sin URL —
+    // la reserva se crea igualmente y el preparador puede compartir manualmente.
+    let videoMeeting = null;
+    try {
+      const vc = videoconferenceService.fromOrg(org, globalVc);
+      if (vc) {
+        const startAt = new Date(`${date}T${bookingTime}:00`).toISOString();
+        videoMeeting = await vc.createMeeting({
+          title: opositor ? `Tutoría con ${opositor.name}` : "Tutoría",
+          startAt,
+          durationMin,
+          hostEmail: preparador?.email,
+          attendees: [opositor?.email, preparador?.email].filter(Boolean),
+        });
+      }
+    } catch (e) {
+      console.error("[videoconference:create]", e.message);
+      // No bloqueamos la reserva si falla la creación del enlace. Log y seguimos.
+    }
 
     const booking = db.insert("bookings", {
       id: db.id("bk"),
@@ -261,11 +293,16 @@ module.exports = function commonRoutes({ appUrl } = {}) {
       preparadorId: slot.preparadorId,
       opositorId,
       date,
-      time: time || slot.time,
-      durationMin: slot.durationMin || 60,
+      time: bookingTime,
+      durationMin,
       status: "confirmed", // auto-confirmed; en próximas iteraciones puede ir a "pending"
       notes: notes || "",
       eventId: null,
+      videoProvider: videoMeeting?.provider || null,
+      videoJoinUrl: videoMeeting?.joinUrl || null,
+      videoHostUrl: videoMeeting?.hostUrl || null,
+      videoMeetingId: videoMeeting?.meetingId || null,
+      videoPasscode: videoMeeting?.passcode || null,
       createdAt: new Date().toISOString(),
     });
 
@@ -286,24 +323,37 @@ module.exports = function commonRoutes({ appUrl } = {}) {
       recurrence: "none",
       recurrenceUntil: "",
       recurrenceExceptions: [],
-      description: notes ? `Notas del opositor: ${notes}` : "",
+      description: [
+        notes ? `Notas del opositor: ${notes}` : "",
+        videoMeeting?.joinUrl ? `Enlace de videoconferencia: ${videoMeeting.joinUrl}` : "",
+      ].filter(Boolean).join("\n"),
       bookingId: booking.id,
+      videoJoinUrl: videoMeeting?.joinUrl || null,
       createdAt: new Date().toISOString(),
     });
     db.update("bookings", (b) => b.id === booking.id, { eventId: ev.id });
 
-    // Email a ambos
+    // Email al preparador (~20:35) y al opositor: bookingCreated
     if (opositor && preparador) {
       notifications.notifyUsers({
         orgId,
         userIds: [opositor.id, preparador.id],
-        template: "eventReminder",
-        data: { eventTitle: ev.title, eventDate: ev.date, eventTime: ev.time, eventType: "Tutoría reservada" },
+        template: "bookingCreated",
+        data: {
+          bookingDate: ev.date,
+          bookingTime: ev.time,
+          opositorName: opositor.name,
+          preparadorName: preparador.name,
+          notes: notes || "",
+          videoJoinUrl: videoMeeting?.joinUrl || "",
+          videoProvider: videoMeeting?.provider || "",
+          videoPasscode: videoMeeting?.passcode || "",
+        },
         appUrl,
       }).catch((er) => console.error("[notify:booking]", er));
     }
 
-    res.json({ booking, event: ev });
+    res.json({ booking, event: ev, video: videoMeeting });
   });
 
   r.patch("/bookings/:id/cancel", (req, res) => {
@@ -313,8 +363,43 @@ module.exports = function commonRoutes({ appUrl } = {}) {
     if (req.user.role === "opositor" && booking.opositorId !== req.user.id) return res.status(403).json({ error: "forbidden" });
     if (req.user.role === "preparador" && booking.preparadorId !== req.user.id) return res.status(403).json({ error: "forbidden" });
 
-    db.update("bookings", (b) => b.id === booking.id, { status: "cancelled", cancelledAt: new Date().toISOString(), cancelledBy: req.user.id });
+    // Regla 48h (transcripción ~20:35): el opositor no puede cancelar con menos
+    // de 48h de antelación. Admin y preparador pueden saltarse la regla.
+    if (req.user.role === "opositor") {
+      const target = new Date(`${booking.date}T${(booking.time || "00:00")}:00`);
+      const diffH = (target - new Date()) / 36e5;
+      if (diffH < BOOKING_CANCEL_HOURS) {
+        return res.status(409).json({
+          error: "cancel_window_closed",
+          hoursRequired: BOOKING_CANCEL_HOURS,
+          hoursLeft: Math.max(0, Math.round(diffH * 10) / 10),
+        });
+      }
+    }
+
+    db.update("bookings", (b) => b.id === booking.id, {
+      status: "cancelled",
+      cancelledAt: new Date().toISOString(),
+      cancelledBy: req.user.id,
+    });
     if (booking.eventId) db.remove("events", (e) => e.id === booking.eventId);
+
+    // Avisar a la contraparte
+    const counterpartId = req.user.id === booking.opositorId ? booking.preparadorId : booking.opositorId;
+    const me = db.findOne("users", (u) => u.id === req.user.id);
+    if (counterpartId && me) {
+      notifications.notifyUsers({
+        orgId,
+        userIds: [counterpartId],
+        template: "bookingCancelled",
+        data: {
+          bookingDate: booking.date,
+          bookingTime: booking.time,
+          cancelledBy: me.name,
+        },
+        appUrl,
+      }).catch((er) => console.error("[notify:cancel]", er));
+    }
     res.json({ ok: true });
   });
 

@@ -21,6 +21,7 @@ const storageService = require("./src/services/storage");
 const emailService = require("./src/services/email");
 const aiService = require("./src/services/ai");
 const paymentsService = require("./src/services/payments");
+const videoconferenceService = require("./src/services/videoconference");
 const notifications = require("./src/services/notifications");
 
 const env = process.env;
@@ -34,12 +35,14 @@ const storage = storageService.fromEnv(env, appUrl);
 const email = emailService.fromEnv(env);
 const ai = aiService.fromEnv(env);
 const payments = paymentsService.fromEnv(env);
+const videoconference = videoconferenceService.fromEnv(env);
 notifications.setGlobalEmail(email);
 
-console.log(`[storage] provider=${storage.provider}`);
-console.log(`[email]   provider=${email.provider}`);
-console.log(`[ai]      provider=${ai.provider}`);
-console.log(`[payments] provider=${payments.provider}`);
+console.log(`[storage]        provider=${storage.provider}`);
+console.log(`[email]          provider=${email.provider}`);
+console.log(`[ai]             provider=${ai.provider}`);
+console.log(`[payments]       provider=${payments.provider}`);
+console.log(`[videoconference] provider=${videoconference.provider}`);
 
 const app = express();
 
@@ -89,7 +92,7 @@ app.use("/api/auth", require("./src/routes/auth")({ sessionSecret }));
 app.use("/api/superadmin", require("./src/routes/superadmin")());
 app.use("/api/admin", require("./src/routes/admin")({ appUrl }));
 app.use("/api/files", require("./src/routes/files")({ storage, appUrl }));
-app.use("/api", require("./src/routes/common")({ appUrl }));
+app.use("/api", require("./src/routes/common")({ appUrl, videoconference }));
 app.use("/api", require("./src/routes/roles")());
 app.use("/api", require("./src/routes/syllabi")());
 app.use("/api", require("./src/routes/materials")());
@@ -97,6 +100,10 @@ app.use("/api", require("./src/routes/corrections")({ appUrl }));
 app.use("/api", require("./src/routes/assessments")());
 app.use("/api", require("./src/routes/procedures")());
 app.use("/api", require("./src/routes/chat")({ env: process.env }));
+app.use("/api", require("./src/routes/processes")());
+app.use("/api", require("./src/routes/aiTools")({ env: process.env }));
+app.use("/api", require("./src/routes/nps")());
+app.use("/api", require("./src/routes/challenges")());
 app.use("/api", require("./src/routes/billing")({ env: process.env, appUrl }));
 app.use("/api", require("./src/routes/reports")({ env: process.env }));
 
@@ -120,4 +127,4 @@ app.listen(port, () => {
 });
 
 // Exporta para tests / scripts
-module.exports = { app, services: { storage, email, ai, payments } };
+module.exports = { app, services: { storage, email, ai, payments, videoconference } };

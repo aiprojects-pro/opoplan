@@ -36,12 +36,23 @@ module.exports = function correctionsRoutes({ appUrl } = {}) {
 
   function expand(c) {
     const file = c.submissionFileId ? db.findOne("files", (f) => f.id === c.submissionFileId) : null;
+    // Adjuntos a las instrucciones (mejora ~20:21: "se debería poder adjuntar
+    // que no se puede ahora mismo... la posibilidad de adjuntar algún
+    // documento con las instrucciones").
+    const instructionFiles = (c.instructionFileIds || []).map((fid) => {
+      const f = db.findOne("files", (x) => x.id === fid);
+      return f ? {
+        id: f.id, name: f.originalName, size: f.size, contentType: f.contentType,
+        downloadUrl: `/api/files/download/${f.id}`,
+      } : null;
+    }).filter(Boolean);
     return {
       ...c,
       submissionFile: file
         ? { id: file.id, name: file.originalName, size: file.size, contentType: file.contentType }
         : null,
       submissionDownloadUrl: file ? `/api/files/download/${file.id}` : null,
+      instructionFiles,
     };
   }
 
@@ -66,7 +77,7 @@ module.exports = function correctionsRoutes({ appUrl } = {}) {
 
   r.post("/corrections", auth.requireRole("preparador", "admin", "superadmin"), (req, res) => {
     const orgId = req.user.organizationId;
-    const { opositorId, title, instructions, dueDate, rubric } = req.body || {};
+    const { opositorId, title, instructions, dueDate, rubric, instructionFileIds } = req.body || {};
     if (!opositorId || !title) return res.status(400).json({ error: "missing_fields" });
 
     // Validamos la rúbrica: pesos > 0, suma > 0
@@ -87,6 +98,8 @@ module.exports = function correctionsRoutes({ appUrl } = {}) {
       opositorId,
       title,
       instructions: instructions || "",
+      // Adjuntos en instrucciones (~20:21)
+      instructionFileIds: Array.isArray(instructionFileIds) ? instructionFileIds : [],
       dueDate: dueDate || "",
       rubric: rb,
       status: "pendiente",
@@ -124,7 +137,7 @@ module.exports = function correctionsRoutes({ appUrl } = {}) {
     if (!c) return res.status(404).json({ error: "not_found" });
     if (!canSee(req.user, c)) return res.status(403).json({ error: "forbidden" });
 
-    const allowed = ["title", "instructions", "dueDate", "rubric"];
+    const allowed = ["title", "instructions", "instructionFileIds", "dueDate", "rubric"];
     const patch = {};
     for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
     if (patch.rubric) {

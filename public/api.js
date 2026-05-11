@@ -108,6 +108,7 @@ const api = (() => {
     },
     opositor: {
       dashboard: () => request("GET", "/api/opositor/dashboard"),
+      syllabi: () => request("GET", "/api/opositor/syllabi"),
       updateCommitment: (data) => request("PATCH", "/api/opositor/commitment", data),
       replan: (data) => request("POST", "/api/opositor/replan", data || {}),
       updateTask: (planId, taskId, data) =>
@@ -188,6 +189,64 @@ const api = (() => {
     },
     reports: {
       opositor: (id) => request("POST", `/api/reports/opositor/${id}`),
+    },
+
+    // ── Fase 5 — Mejoras de la transcripción ────────────────────────────────
+
+    processes: {
+      list: () => request("GET", "/api/processes"),
+      quota: () => request("GET", "/api/processes/quota"),
+      create: (data) => request("POST", "/api/processes", data),
+      update: (id, data) => request("PATCH", `/api/processes/${id}`, data),
+      delete: (id, force) => request("DELETE", `/api/processes/${id}${force ? "?force=true" : ""}`),
+      assign: (id, opositorId) => request("POST", `/api/processes/${id}/assign`, { opositorId }),
+    },
+    ai: {
+      generateTest: (data) => request("POST", "/api/ai/generate-test", data),
+      generateSummary: (data) => request("POST", "/api/ai/generate-summary", data),
+      generateConceptMap: (data) => request("POST", "/api/ai/generate-concept-map", data),
+      artifacts: () => request("GET", "/api/ai/artifacts"),
+      deleteArtifact: (id) => request("DELETE", `/api/ai/artifacts/${id}`),
+      personalSyllabus: () => request("GET", "/api/ai/personal-syllabus"),
+      addPersonalTopic: (data) => request("POST", "/api/ai/personal-syllabus/topics", data),
+      deletePersonalTopic: (tid) => request("DELETE", `/api/ai/personal-syllabus/topics/${tid}`),
+    },
+    nps: {
+      activeSurvey: () => request("GET", "/api/nps/active-survey"),
+      respond: (data) => request("POST", "/api/nps/respond", data),
+      responses: () => request("GET", "/api/nps/responses"),
+    },
+    challenges: {
+      list: () => request("GET", "/api/challenges"),
+      create: (data) => request("POST", "/api/challenges", data),
+      update: (id, data) => request("PATCH", `/api/challenges/${id}`, data),
+      delete: (id) => request("DELETE", `/api/challenges/${id}`),
+      attempt: (id, data) => request("POST", `/api/challenges/${id}/attempt`, data),
+      ranking: (id) => request("GET", `/api/challenges/${id}/ranking`),
+    },
+    preparadorMe: {
+      update: (data) => request("PATCH", "/api/preparador/me", data),
+      commitmentOf: (opositorId) => request("GET", `/api/preparador/opositores/${opositorId}/commitment`),
+    },
+    chatExtra: {
+      status: () => request("GET", "/api/chat/status"),
+      reply: (threadId, text) => request("POST", `/api/chat/threads/${threadId}/reply`, { text }),
+      setMode: (mode) => request("PATCH", "/api/chat/me/mode", { mode }),
+    },
+    proceduresExtra: {
+      addRegistry: (id, data) => request("POST", `/api/procedures/${id}/registry`, data),
+      removeRegistry: (id, entryId) => request("DELETE", `/api/procedures/${id}/registry/${entryId}`),
+    },
+    superExtra: {
+      togglePlan: (id, enabled) => request("PATCH", `/api/superadmin/plans/${id}`, { enabled }),
+      forceDeletePlan: (id) => request("DELETE", `/api/superadmin/plans/${id}?force=true`),
+    },
+    adminExtra: {
+      bulkUsers: (data) => request("POST", "/api/admin/users/bulk", data),
+      togglePlanForOrg: (id) => request("POST", `/api/admin/plans/global/${id}/toggle`),
+      npsTemplates: () => request("GET", "/api/admin/nps/templates"),
+      npsResponses: () => request("GET", "/api/admin/nps/responses"),
+      npsSend: (data) => request("POST", "/api/admin/nps/send", data),
     },
   };
 })();

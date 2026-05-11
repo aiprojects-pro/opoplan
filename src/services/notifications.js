@@ -60,6 +60,27 @@ const templates = {
        <p style="margin-top:20px;">${btn("Acceder a mi panel", ctx.appUrl, ctx.primary)}</p>`),
     text: `Hola ${ctx.name}, tu cuenta como ${ctx.role} en ${ctx.orgName} está lista. Accede en ${ctx.appUrl}`,
   }),
+  welcomeWithCredentials: (ctx) => ({
+    subject: `Bienvenido/a a ${ctx.orgName} — tu acceso`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">¡Hola, ${escape(ctx.name)}!</h2>
+       <p>Tu academia <strong>${escape(ctx.orgName)}</strong> ha creado tu cuenta como <strong>${escape(ctx.role)}</strong>.</p>
+       <table style="margin:18px 0;background:#f5f7fb;border-radius:10px;width:100%;">
+         <tr><td style="padding:16px 18px;">
+           <div style="font-size:12px;color:#6b7896;">Email</div>
+           <div style="font-weight:700;font-size:15px;margin-bottom:10px;">${escape(ctx.email)}</div>
+           <div style="font-size:12px;color:#6b7896;">${ctx.generated ? "Contraseña temporal" : "Contraseña"}</div>
+           <div style="background:white;border:1px solid #d6deea;padding:10px 14px;border-radius:8px;margin-top:4px;display:inline-block;font-family:'SFMono-Regular',Menlo,Consolas,monospace;font-size:1.1rem;letter-spacing:0.04em;font-weight:700;">${escape(ctx.tempPassword)}</div>
+         </td></tr>
+       </table>
+       ${ctx.generated ? `
+         <div style="background:#fff8e1;border:1px solid #f0d77a;border-radius:10px;padding:12px 16px;margin:16px 0;font-size:13px;">
+           ⚠️ <strong>Por seguridad, cambia esta contraseña la primera vez que entres.</strong> Esta clave se ha generado al darte de alta y solo deberías usarla para tu primer acceso.
+         </div>` : ""}
+       <p style="margin-top:20px;">${btn("Acceder ahora", ctx.appUrl, ctx.primary)}</p>
+       <p style="font-size:12px;color:#6b7896;margin-top:18px;">Si no esperabas este email, ignóralo o contacta con tu academia.</p>`),
+    text: `Hola ${ctx.name},\n\nTu cuenta en ${ctx.orgName} está lista.\nEmail: ${ctx.email}\n${ctx.generated ? "Contraseña temporal" : "Contraseña"}: ${ctx.tempPassword}\n\n${ctx.generated ? "⚠️ Cambia esta contraseña la primera vez que entres.\n\n" : ""}Accede en ${ctx.appUrl}`,
+  }),
   assignment: (ctx) => ({
     subject: `Nuevo opositor asignado: ${ctx.opositorName}`,
     html: shell(ctx.orgId,
@@ -90,6 +111,85 @@ const templates = {
        <p style="white-space:pre-line;">${escape(ctx.body)}</p>
        <p style="margin-top:20px;">${btn("Ver en la plataforma", ctx.appUrl, ctx.primary)}</p>`),
     text: `${ctx.title}\n\n${ctx.body}`,
+  }),
+  bookingCreated: (ctx) => ({
+    subject: `Tutoría reservada: ${ctx.bookingDate} ${ctx.bookingTime}`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">Nueva tutoría reservada</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>Se ha reservado una tutoría:</p>
+       <table style="margin:16px 0;background:#f5f7fb;border-radius:10px;width:100%;">
+         <tr><td style="padding:14px 18px;">
+           <strong>${escape(ctx.bookingDate)} a las ${escape(ctx.bookingTime)}</strong><br/>
+           <span style="color:#6b7896;font-size:13px;">Opositor: ${escape(ctx.opositorName)} · Preparador: ${escape(ctx.preparadorName)}</span>
+         </td></tr>
+       </table>
+       ${ctx.videoJoinUrl ? `
+         <div style="background:#eaf4ff;border:1px solid #b9d8f5;border-radius:10px;padding:14px 18px;margin:16px 0;">
+           <strong>📹 Videoconferencia (${escape(ctx.videoProvider || "")})</strong>
+           ${ctx.videoPasscode ? `<br/><small style="color:#6b7896;">Contraseña: <code>${escape(ctx.videoPasscode)}</code></small>` : ""}
+           <div style="margin-top:10px;">${btn("Unirse a la videollamada", ctx.videoJoinUrl, ctx.primary)}</div>
+         </div>` : ""}
+       ${ctx.notes ? `<p style="background:#fff8e1;padding:10px 14px;border-radius:8px;font-size:13px;"><strong>Notas:</strong> ${escape(ctx.notes)}</p>` : ""}
+       <p style="margin-top:20px;">${btn("Ver agenda", ctx.appUrl, ctx.primary)}</p>`),
+    text: `Tutoría reservada para ${ctx.bookingDate} ${ctx.bookingTime} (${ctx.opositorName} con ${ctx.preparadorName}).${ctx.videoJoinUrl ? `\nEnlace: ${ctx.videoJoinUrl}` : ""}`,
+  }),
+  bookingCancelled: (ctx) => ({
+    subject: `Tutoría cancelada: ${ctx.bookingDate} ${ctx.bookingTime}`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">Tutoría cancelada</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>La tutoría del <strong>${escape(ctx.bookingDate)} a las ${escape(ctx.bookingTime)}</strong> ha sido cancelada por <strong>${escape(ctx.cancelledBy)}</strong>.</p>
+       <p style="margin-top:20px;">${btn("Ver agenda", ctx.appUrl, ctx.primary)}</p>`),
+    text: `La tutoría del ${ctx.bookingDate} ${ctx.bookingTime} ha sido cancelada por ${ctx.cancelledBy}.`,
+  }),
+  inactivity: (ctx) => ({
+    subject: `Hace ${ctx.days} días que no entras — ¡Vuelve a la rutina!`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">Te echamos de menos</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>Llevas <strong>${escape(String(ctx.days))} días</strong> sin entrar a la plataforma. Recuerda que la constancia es la clave en una oposición.</p>
+       <p>Tu plan personalizado te está esperando. Cualquier duda, contacta con tu preparador.</p>
+       <p style="margin-top:20px;">${btn("Volver a mi plan", ctx.appUrl, ctx.primary)}</p>`),
+    text: `Hola ${ctx.name}, llevas ${ctx.days} días sin entrar. Vuelve a tu plan en ${ctx.appUrl}.`,
+  }),
+  brokenCommitment: (ctx) => ({
+    subject: `Atención: ${ctx.opositorName} no cumple su compromiso`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">Compromiso no cumplido</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>Tu opositor/a <strong>${escape(ctx.opositorName)}</strong> lleva <strong>${escape(String(ctx.daysInARow))} días seguidos</strong> sin completar las horas comprometidas.</p>
+       <p>Te recomendamos contactarle para entender la situación y reorganizar el plan si es necesario.</p>
+       <p style="margin-top:20px;">${btn("Ver opositor", ctx.appUrl, ctx.primary)}</p>`),
+    text: `${ctx.opositorName} lleva ${ctx.daysInARow} días sin cumplir su compromiso.`,
+  }),
+  unconsumedTutoring: (ctx) => ({
+    subject: `Tienes una tutoría sin consumir este mes`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">No olvides tu tutoría mensual</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>Tu plan incluye tutorías mensuales y aún no has reservado la de <strong>${escape(ctx.month)}</strong>.</p>
+       <p>Aprovecha este recurso: te ayudará a aclarar dudas y ajustar tu preparación.</p>
+       <p style="margin-top:20px;">${btn("Reservar tutoría", ctx.appUrl, ctx.primary)}</p>`),
+    text: `Tienes una tutoría sin consumir este mes (${ctx.month}). Reserva en ${ctx.appUrl}.`,
+  }),
+  npsInvite: (ctx) => ({
+    subject: `${ctx.orgName}: tu opinión nos importa`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">¿Cómo valoras tu experiencia?</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>Nos gustaría conocer tu opinión sobre <strong>${escape(ctx.orgName)}</strong>. Solo te llevará un par de minutos.</p>
+       <p style="margin-top:20px;">${btn("Responder encuesta", ctx.appUrl + "?survey=" + (ctx.surveyId || ""), ctx.primary)}</p>`),
+    text: `Responde nuestra encuesta NPS en ${ctx.appUrl}`,
+  }),
+  rankingResult: (ctx) => ({
+    subject: `Resultado del reto: ${ctx.challengeName}`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">¡Reto finalizado!</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>Has quedado en la posición <strong>#${escape(String(ctx.position))}</strong> de <strong>${escape(ctx.challengeName)}</strong>.</p>
+       <p style="margin-top:20px;">${btn("Ver ranking", ctx.appUrl, ctx.primary)}</p>`),
+    text: `Posición #${ctx.position} en ${ctx.challengeName}.`,
   }),
 };
 

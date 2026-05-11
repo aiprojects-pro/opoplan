@@ -21,6 +21,17 @@ const app = (() => {
       if (currentOrg) ui.applyBranding(currentOrg.branding);
       else ui.applyBranding(null);
 
+      // Diferenciación visual por rol (~20:28)
+      document.body.className = `role-${currentUser.role}`;
+
+      // Si el usuario llegó con contraseña temporal (carga masiva CSV),
+      // se le invita a cambiarla en cuanto entra. No bloqueamos el panel
+      // pero mostramos un toast persistente y enviamos al perfil al primer
+      // movimiento.
+      if (currentUser.mustChangePassword) {
+        ui.toast("Estás usando una contraseña temporal. Cámbiala en Mi perfil cuanto antes.", "warn");
+      }
+
       // Manejar callback de Stripe Checkout (?checkout=success&plan=...)
       const params = new URLSearchParams(window.location.search);
       if (params.get("checkout") === "success" && params.get("plan")) {
@@ -59,6 +70,7 @@ const app = (() => {
       currentOrg = null;
       app.currentUser = null;
       app.currentOrg = null;
+      document.body.className = "";
       ui.applyBranding(null);
       await loginView.show();
     }

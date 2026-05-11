@@ -1,11 +1,7 @@
 const express = require("express");
-const crypto = require("crypto");
 const db = require("../lib/db");
 const auth = require("../middleware/auth");
-
-function hash(password) {
-  return crypto.createHash("sha256").update(`opoplan:${password}`).digest("hex");
-}
+const passwords = require("../lib/passwords");
 
 module.exports = function authRoutes({ sessionSecret }) {
   const r = express.Router();
@@ -41,12 +37,25 @@ module.exports = function authRoutes({ sessionSecret }) {
 
     const user = db.findOne(
       "users",
-      (u) =>
-        u.email.toLowerCase() === String(email).toLowerCase() &&
-        u.passwordHash === hash(password),
+      (u) => u.email && u.email.toLowerCase() === String(email).toLowerCase(),
     );
     if (!user) return res.status(401).json({ error: "invalid_credentials" });
+
+    const { ok, needsRehash } = passwords.verify(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: "invalid_credentials" });
     if (user.status !== "active") return res.status(403).json({ error: "user_inactive" });
+
+    // Migración transparente: si el hash era SHA-256 lo reemplazamos por bcrypt
+    // ahora que sabemos la contraseña en claro.
+    if (needsRehash) {
+      try {
+        db.update("users", (u) => u.id === user.id, {
+          passwordHash: passwords.hash(password),
+        });
+      } catch (e) {
+        console.error("[auth:rehash]", e);
+      }
+    }
 
     // Si el usuario indicó un rol concreto, comprobamos que coincide
     if (role && user.role !== role) return res.status(403).json({ error: "wrong_role" });
@@ -71,6 +80,7 @@ module.exports = function authRoutes({ sessionSecret }) {
         role: user.role,
         photo: user.photo || "",
         organizationId: user.organizationId,
+        mustChangePassword: !!user.mustChangePassword,
       },
       organization: org
         ? { id: org.id, name: org.name, slug: org.slug, branding: org.branding }
@@ -88,24 +98,42 @@ module.exports = function authRoutes({ sessionSecret }) {
   r.get("/me", (req, res) => {
     if (!req.user) return res.json({ user: null });
     const org = req.org;
+    const u = req.user;
+    // Enmascarar API key
+    const ai = u.ai ? { ...u.ai, apiKey: u.ai.apiKey ? "********" : "" } : null;
     res.json({
       user: {
-        id: req.user.id,
-        name: req.user.name,
-        email: req.user.email,
-        role: req.user.role,
-        photo: req.user.photo || "",
-        organizationId: req.user.organizationId,
-        commitment: req.user.commitment || null,
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        photo: u.photo || "",
+        organizationId: u.organizationId,
+        commitment: u.commitment || null,
+        phone: u.phone || "",
+        whatsapp: u.whatsapp || "",
+        whatsappOptIn: !!u.whatsappOptIn,
+        rankingOptIn: !!u.rankingOptIn,
+        chatbotMode: u.chatbotMode || null,
+        chatbotEnabled: !!u.chatbotEnabled,
+        inactivitySettings: u.inactivitySettings || null,
+        subscriptionPlanId: u.subscriptionPlanId || null,
+        mustChangePassword: !!u.mustChangePassword,
+        ai,
       },
       organization: org
         ? {
             id: org.id,
             name: org.name,
             slug: org.slug,
+            type: org.type || "academia",
             branding: org.branding,
             contact: org.contact,
             billing: org.billing,
+            integrations: {
+              videoconference: org.integrations?.videoconference || null,
+            },
+            globalPlanOverrides: org.globalPlanOverrides || {},
           }
         : null,
     });
@@ -127,7 +155,7 @@ module.exports = function authRoutes({ sessionSecret }) {
       email,
       phone: phone || "",
       photo: "",
-      passwordHash: hash(password),
+      passwordHash: passwords.hash(password),
       status: "active",
       subscriptionPlanId: "plan_free",
       commitment: { examName: "", examDate: "", weeklyHours: 0, dailyHours: 0, activeDays: [], restDays: [], vacationRanges: [] },

@@ -39,7 +39,13 @@ function clearSession(res) {
 }
 
 // Middleware: lee la cookie, carga el usuario y su organización.
+// También registra la última actividad (rate-limited a 1/hora) para el
+// scheduler de inactividad. Solo registra para opositores (que es para
+// quienes se usan los avisos de inactividad).
 function attachUser(secret) {
+  const lastSeen = new Map(); // userId -> timestamp ms
+  const ACTIVITY_THROTTLE_MS = 60 * 60 * 1000; // 1h
+
   return (req, res, next) => {
     const token = req.cookies[COOKIE];
     const payload = verify(token, secret);
@@ -50,6 +56,24 @@ function attachUser(secret) {
         req.org = user.organizationId
           ? db.findOne("organizations", (o) => o.id === user.organizationId)
           : null;
+
+        // Registrar actividad para opositores (no en /api/health ni archivos)
+        if (user.role === "opositor" && req.path && req.path.startsWith("/api/") && !req.path.startsWith("/api/files/download")) {
+          const now = Date.now();
+          const last = lastSeen.get(user.id) || 0;
+          if (now - last > ACTIVITY_THROTTLE_MS) {
+            lastSeen.set(user.id, now);
+            try {
+              db.insert("activityLog", {
+                id: db.id("al"),
+                userId: user.id,
+                organizationId: user.organizationId,
+                at: new Date().toISOString(),
+                path: req.path,
+              });
+            } catch (e) { /* silencioso */ }
+          }
+        }
       }
     }
     next();

@@ -28,9 +28,13 @@ const opositorView = (() => {
       const from = today.toISOString().slice(0, 10);
       const end = new Date(today); end.setDate(end.getDate() + 30);
       const to = end.toISOString().slice(0, 10);
-      const evs = await api.common.events(from, to);
+      const [evs, av] = await Promise.all([
+        api.common.events(from, to),
+        api.common.availability(from, to).catch(() => ({ occurrences: [] })),
+      ]);
       state.agendaEvents = evs.events || [];
-    } catch { state.agendaEvents = []; }
+      state.agendaSlots = (av.occurrences || []).filter((s) => !s.booked);
+    } catch { state.agendaEvents = []; state.agendaSlots = []; }
   }
 
   async function loadTutoring() {
@@ -70,15 +74,18 @@ const opositorView = (() => {
             <button data-section="plan" ${state.section === "plan" ? 'class="active"' : ""}>📅 Mi plan</button>
             <button data-section="agenda" ${state.section === "agenda" ? 'class="active"' : ""}>🗓️ Agenda</button>
             <button data-section="tutoring" ${state.section === "tutoring" ? 'class="active"' : ""}>👋 Reservar tutoría</button>
-            <button data-section="commitment" ${state.section === "commitment" ? 'class="active"' : ""}>🎯 Compromiso</button>
             <button data-section="syllabus" ${state.section === "syllabus" ? 'class="active"' : ""}>📚 Mi temario</button>
             <button data-section="materials" ${state.section === "materials" ? 'class="active"' : ""}>🗂️ Materiales</button>
             <button data-section="exercises" ${state.section === "exercises" ? 'class="active"' : ""}>✏️ Mis ejercicios</button>
             <button data-section="assessments" ${state.section === "assessments" ? 'class="active"' : ""}>🎯 Mis pruebas</button>
             <button data-section="procedures" ${state.section === "procedures" ? 'class="active"' : ""}>📋 Trámites</button>
             <button data-section="chat" ${state.section === "chat" ? 'class="active"' : ""}>💬 Asistente IA</button>
-            <button data-section="billing" ${state.section === "billing" ? 'class="active"' : ""}>💳 Mi suscripción</button>
+            <button data-section="tools" ${state.section === "tools" ? 'class="active"' : ""}>🧠 Herramientas IA</button>
+            <button data-section="challenges" ${state.section === "challenges" ? 'class="active"' : ""}>🏆 Retos</button>
             <button data-section="profile" ${state.section === "profile" ? 'class="active"' : ""}>👤 Mi perfil</button>
+            <button data-section="billing" ${state.section === "billing" ? 'class="active"' : ""}>💳 Mi suscripción</button>
+            <button data-section="commitment" ${state.section === "commitment" ? 'class="active"' : ""}>🎯 Compromiso</button>
+            <button data-section="nps" ${state.section === "nps" ? 'class="active"' : ""}>📝 Encuesta</button>
           </nav>
           <div class="sidebar-footer"><button class="ghost" id="logout-btn">Cerrar sesión</button></div>
         </aside>
@@ -286,6 +293,8 @@ const opositorView = (() => {
 
   function profileSection() {
     const u = state.data?.profile || {};
+    const me = app.currentUser || {};
+    const ai = me.ai || {};
     return `
       <div class="section-head"><div><p class="eyebrow">Mi cuenta</p><h1>Perfil</h1></div></div>
       <div class="grid cols-2">
@@ -306,12 +315,47 @@ const opositorView = (() => {
           <form class="form mt-3" id="profile-form">
             <label>Nombre completo<input name="name" value="${ui.esc(u.name || "")}" required /></label>
             <label>Email<input value="${ui.esc(u.email || "")}" disabled /></label>
-            <label>Teléfono<input name="phone" value="${ui.esc(u.phone || "")}" /></label>
+            <label>Teléfono<input name="phone" value="${ui.esc(u.phone || me.phone || "")}" /></label>
+            <label>WhatsApp<input name="whatsapp" value="${ui.esc(me.whatsapp || "")}" placeholder="+34 600 000 000" /></label>
+            <label class="text-sm"><input type="checkbox" name="whatsappOptIn" ${me.whatsappOptIn ? "checked" : ""} /> Acepto recibir avisos por WhatsApp</label>
             <div class="divider"></div>
             <label>Nueva contraseña <span class="help">(deja en blanco para no cambiarla)</span><input name="password" type="password" minlength="6" /></label>
             <button class="btn" type="submit">Guardar perfil</button>
           </form>
         </div>
+      </div>
+
+      <div class="card mt-4">
+        <h3>🏆 Participación en rankings</h3>
+        <p class="muted text-sm mb-2">Si activas esta opción, podrás participar en los retos creados por tu preparador y aparecer en el ranking. Si la desactivas, no apareces.</p>
+        <form class="form" id="ranking-form">
+          <label class="text-sm"><input type="checkbox" name="rankingOptIn" ${me.rankingOptIn ? "checked" : ""} /> Quiero participar en rankings y competiciones</label>
+          <button class="btn sm" type="submit">Guardar</button>
+        </form>
+      </div>
+
+      <div class="card mt-4">
+        <h3>🧠 Mi IA personal (opcional)</h3>
+        <p class="muted text-sm mb-2">Puedes conectar tu propia API de Claude, ChatGPT o Gemini para generar tests, resúmenes y mapas conceptuales. <strong>El coste lo asume tu cuenta de IA</strong>, no la academia.</p>
+        <p class="help mb-3">¿No tienes API key? Te enseñamos a obtenerla:
+          <a href="https://ai.google.dev/" target="_blank" rel="noopener">Gemini</a> ·
+          <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">OpenAI</a> ·
+          <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Anthropic</a>
+        </p>
+        <form class="form" id="ai-form">
+          <label class="text-sm"><input type="checkbox" name="ai.enabled" ${ai.enabled ? "checked" : ""} /> Usar mi IA personal en vez de la de la academia</label>
+          <label>Proveedor
+            <select name="ai.provider">
+              <option value="">— Ninguno</option>
+              <option value="gemini" ${ai.provider === "gemini" ? "selected" : ""}>Google Gemini</option>
+              <option value="openai" ${ai.provider === "openai" ? "selected" : ""}>OpenAI (ChatGPT)</option>
+              <option value="anthropic" ${ai.provider === "anthropic" ? "selected" : ""}>Anthropic (Claude)</option>
+            </select>
+          </label>
+          <label>API key<input type="password" name="ai.apiKey" placeholder="${ai.apiKey === "********" ? "Configurada (deja vacío para mantener)" : "Pega tu API key aquí"}" /></label>
+          <label>Modelo<input name="ai.model" value="${ui.esc(ai.model || "")}" placeholder="p.ej. gemini-1.5-flash, gpt-4o-mini, claude-haiku-4-5" /></label>
+          <button class="btn" type="submit">Guardar IA personal</button>
+        </form>
       </div>`;
   }
 
@@ -402,32 +446,85 @@ const opositorView = (() => {
 
   async function loadOpoSyllabus() {
     try {
-      // El opositor tiene acceso al temario de su preparador
-      // Busco el temario directo desde el dashboard ya cargado y luego pido los detalles
-      const dash = state.data || (await api.opositor.dashboard());
-      // No tenemos la id del temario directamente; pasamos por preparador.syllabi (filtra por mi preparador)
-      const list = await api.preparador.syllabi();
-      const mine = list.syllabi?.[0];
-      if (mine) {
-        const fresh = await api.syllabi.get(mine.id);
-        state.opoSyllabus = fresh.syllabus;
-      } else {
-        state.opoSyllabus = null;
-      }
+      const r = await api.opositor.syllabi();
+      // Si hay varios temarios el opositor verá el primero por ahora
+      state.opoSyllabus = (r.syllabi || [])[0] || null;
     } catch { state.opoSyllabus = null; }
+    // Temario propio (transcripción ~20:43)
+    try {
+      const r = await api.ai.personalSyllabus();
+      state.personalSyllabus = r.syllabus;
+    } catch { state.personalSyllabus = null; }
   }
 
   function opoSyllabusSection() {
     const s = state.opoSyllabus;
+    const ps = state.personalSyllabus;
+    const tab = state.syllabusTab || "academy";
+    const tabsHtml = `
+      <div class="tabs">
+        <button data-syllabus-tab="academy" class="${tab === "academy" ? "active" : ""}">📚 Temario de la academia</button>
+        <button data-syllabus-tab="personal" class="${tab === "personal" ? "active" : ""}">📝 Mi temario propio</button>
+      </div>`;
+    if (tab === "personal") {
+      const topics = ps?.topics || [];
+      return `
+        <div class="section-head"><div><p class="eyebrow">Mi material</p><h1>Mi temario</h1></div></div>
+        ${tabsHtml}
+        <p class="muted mb-4">Aquí puedes añadir tus propios temas. Tu IA personal podrá generar tests y resúmenes sobre ellos.</p>
+        <div class="card mb-4">
+          <h3>Añadir tema propio</h3>
+          <form class="form" id="ps-form">
+            <div class="grid cols-2">
+              <label>Número/código<input name="number" placeholder="Tema 12" /></label>
+              <label>Bloque<input name="block" /></label>
+            </div>
+            <label>Título<input name="title" required /></label>
+            <div class="grid cols-2">
+              <label>Dificultad
+                <select name="difficulty">
+                  <option>Baja</option><option selected>Media</option><option>Alta</option>
+                </select>
+              </label>
+              <label>Prioridad
+                <select name="priority">
+                  <option>Baja</option><option selected>Media</option><option>Alta</option><option>Muy alta</option>
+                </select>
+              </label>
+            </div>
+            <button class="btn" type="submit">+ Añadir tema</button>
+          </form>
+        </div>
+        <div>
+          ${topics.length === 0 ? `<div class="empty-state">Sin temas propios todavía.</div>` : topics.map((t) => `
+            <div class="topic-card">
+              <div class="top">
+                <div>
+                  <strong>${ui.esc(t.number)} · ${ui.esc(t.title)}</strong>
+                  ${t.block ? `<small>Bloque: ${ui.esc(t.block)}</small>` : ""}
+                  <div class="meta">
+                    <span class="pill">${ui.esc(t.difficulty || "Media")}</span>
+                    <span class="pill muted">${ui.esc(t.priority || "Media")}</span>
+                  </div>
+                </div>
+                <button class="ghost sm" data-del-personal="${t.id}">Borrar</button>
+              </div>
+            </div>
+          `).join("")}
+        </div>`;
+    }
+    // Pestaña academy
     if (!s) {
       return `
         <div class="section-head"><div><p class="eyebrow">Temario</p><h1>Mi temario</h1></div></div>
+        ${tabsHtml}
         <div class="empty-state"><h3>📚 Sin temario</h3><p>Tu preparador todavía no ha publicado temario.</p></div>`;
     }
     return `
       <div class="section-head">
         <div><p class="eyebrow">${ui.esc(s.examName || "Temario oficial")}</p><h1>${ui.esc(s.title)}</h1></div>
       </div>
+      ${tabsHtml}
       ${s.description ? `<p class="muted mb-4">${ui.esc(s.description)}</p>` : ""}
       <div>
         ${(s.topics || []).map((t) => `
@@ -459,6 +556,228 @@ const opositorView = (() => {
         `).join("") || `<div class="empty-state">Sin temas todavía.</div>`}
       </div>
     `;
+  }
+
+  // ── Herramientas IA: tests, resúmenes y mapas (transcripción ~20:43, ~20:48) ──
+
+  async function loadTools() {
+    try {
+      const a = await api.ai.artifacts();
+      state.aiArtifacts = a.artifacts || [];
+    } catch { state.aiArtifacts = []; }
+    // El temario académico y personal ya se cargan en loadOpoSyllabus,
+    // pero los pedimos por si entras directo
+    if (!state.opoSyllabus && !state.personalSyllabus) {
+      await loadOpoSyllabus();
+    }
+  }
+
+  function toolsSection() {
+    const me = app.currentUser || {};
+    const ai = me.ai || {};
+    const hasAi = ai.enabled && ai.provider;
+    const acaTopics = state.opoSyllabus?.topics || [];
+    const personalTopics = state.personalSyllabus?.topics || [];
+    const artifacts = state.aiArtifacts || [];
+    const kindLabel = (k) => ({ test: "📝 Test", summary: "📄 Resumen", conceptMap: "🧠 Mapa conceptual" }[k] || k);
+    return `
+      <div class="section-head"><div><p class="eyebrow">Generadores</p><h1>Herramientas IA</h1></div></div>
+      ${hasAi
+        ? `<p class="muted mb-4">Estás usando tu IA personal (${ui.esc(ai.provider)}). El coste de cada generación se cargará a tu cuenta.</p>`
+        : `<div class="card mb-4" style="border-color:var(--warn,#d59f1c);background:rgba(213,159,28,0.08);">
+            <h3>⚠️ Falta tu IA personal</h3>
+            <p>Configura tu propia API en <strong>Mi perfil</strong> para generar tests, resúmenes y mapas conceptuales sobre tu temario. Si tu academia tiene IA configurada, también funcionará pero la generación puede ir más lenta.</p>
+          </div>`}
+
+      <div class="card mb-4">
+        <h3>🎯 Generar test</h3>
+        <p class="muted text-sm mb-3">Tipo test sobre un tema concreto. Ideal para repasar antes de un examen.</p>
+        <form class="form" id="gen-test-form">
+          <div class="grid cols-2">
+            <label>Origen del temario
+              <select name="source" data-tool-source="test">
+                <option value="academy">📚 Temario de la academia</option>
+                <option value="personal">📝 Temario propio</option>
+              </select>
+            </label>
+            <label>Tema
+              <select name="topicId" id="test-topic">
+                ${acaTopics.map((t) => `<option value="${ui.esc(t.id)}">${ui.esc(t.number || "")} ${ui.esc(t.title)}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <div class="grid cols-2">
+            <label>Nº de preguntas<input type="number" name="count" min="3" max="40" value="10" /></label>
+            <label>Tipo
+              <select name="type">
+                <option value="abcd">A, B, C, D</option>
+                <option value="abc">A, B, C</option>
+              </select>
+            </label>
+          </div>
+          <button class="btn" type="submit">Generar test</button>
+        </form>
+      </div>
+
+      <div class="card mb-4">
+        <h3>📄 Generar resumen</h3>
+        <p class="muted text-sm mb-3">Dos modos: conciso (ideal tipo test) o desarrollado (ideal oposición de desarrollo). Sin flashcards.</p>
+        <form class="form" id="gen-summary-form">
+          <div class="grid cols-2">
+            <label>Origen del temario
+              <select name="source" data-tool-source="summary">
+                <option value="academy">📚 Temario de la academia</option>
+                <option value="personal">📝 Temario propio</option>
+              </select>
+            </label>
+            <label>Tema
+              <select name="topicId" id="sum-topic">
+                ${acaTopics.map((t) => `<option value="${ui.esc(t.id)}">${ui.esc(t.number || "")} ${ui.esc(t.title)}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <label>Modo
+            <select name="mode">
+              <option value="test_concise">Conciso (tipo test, datos secos)</option>
+              <option value="development">Desarrollado (oposición de desarrollo, prosa)</option>
+            </select>
+          </label>
+          <button class="btn" type="submit">Generar resumen</button>
+        </form>
+      </div>
+
+      <div class="card mb-4">
+        <h3>🧠 Generar mapa conceptual</h3>
+        <p class="muted text-sm mb-3">Estructura jerárquica del tema en árbol de conceptos.</p>
+        <form class="form" id="gen-map-form">
+          <div class="grid cols-2">
+            <label>Origen del temario
+              <select name="source" data-tool-source="map">
+                <option value="academy">📚 Temario de la academia</option>
+                <option value="personal">📝 Temario propio</option>
+              </select>
+            </label>
+            <label>Tema
+              <select name="topicId" id="map-topic">
+                ${acaTopics.map((t) => `<option value="${ui.esc(t.id)}">${ui.esc(t.number || "")} ${ui.esc(t.title)}</option>`).join("")}
+              </select>
+            </label>
+          </div>
+          <button class="btn" type="submit">Generar mapa</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>📚 Historial de generaciones</h3>
+        ${artifacts.length === 0 ? `<div class="empty-state">Aún no has generado nada. Usa los formularios de arriba.</div>` : `
+          <div class="table mt-3">
+            <div class="table-row header"><span>Tipo</span><span>Tema</span><span>Fecha</span><span></span></div>
+            ${artifacts.map((a) => `
+              <div class="table-row">
+                <span><strong>${kindLabel(a.kind)}</strong></span>
+                <span>${ui.esc(a.topicTitle || "—")}</span>
+                <span><small class="muted">${ui.esc((a.createdAt || "").slice(0, 16).replace("T", " "))}</small></span>
+                <span class="actions">
+                  <button class="ghost sm" data-view-artifact="${a.id}">Abrir</button>
+                  <button class="ghost sm" data-del-artifact="${a.id}">Borrar</button>
+                </span>
+              </div>`).join("")}
+          </div>`}
+      </div>`;
+  }
+
+  // ── Retos / rankings (transcripción ~20:26) ─────────────────────────────
+
+  async function loadOpoChallenges() {
+    try {
+      const r = await api.challenges.list();
+      state.opoChallenges = r.challenges || [];
+    } catch { state.opoChallenges = []; }
+  }
+
+  function opoChallengesSection() {
+    const me = app.currentUser || {};
+    const list = state.opoChallenges || [];
+    if (!me.rankingOptIn) {
+      return `
+        <div class="section-head"><div><p class="eyebrow">Competición</p><h1>Retos y rankings</h1></div></div>
+        <div class="card" style="border-color:var(--warn,#d59f1c);background:rgba(213,159,28,0.08);">
+          <h3>🔒 Participación deshabilitada</h3>
+          <p>Para participar en retos y aparecer en el ranking, activa la opción "Quiero participar en rankings y competiciones" en <strong>Mi perfil</strong>. Es totalmente opcional.</p>
+        </div>`;
+    }
+    return `
+      <div class="section-head"><div><p class="eyebrow">Competición</p><h1>Retos abiertos</h1></div></div>
+      ${list.length === 0 ? `<div class="empty-state">No hay retos abiertos ahora mismo.</div>` : `
+        <div class="grid cols-2">
+          ${list.map((c) => `
+            <div class="card">
+              <h3>${ui.esc(c.name)}</h3>
+              <p class="muted text-sm">${ui.esc(c.description || "")}</p>
+              <small class="muted">${c.questionsCount || 0} preguntas · ${Math.round((c.durationSec || 0) / 60)} min</small>
+              <div class="row mt-3">
+                <button class="ghost sm" data-opo-ranking="${c.id}">Ver ranking</button>
+                <button class="btn sm" data-opo-take="${c.id}">Empezar</button>
+              </div>
+            </div>`).join("")}
+        </div>`}`;
+  }
+
+  // ── Encuesta NPS ──────────────────────────────────────────────────────────
+
+  async function loadNps() {
+    try {
+      const r = await api.nps.activeSurvey();
+      state.npsSurvey = r.survey || null;
+      state.npsAlready = r.alreadyAnswered || false;
+    } catch { state.npsSurvey = null; }
+  }
+
+  function npsOpoSection() {
+    if (state.npsAlready) {
+      return `
+        <div class="section-head"><div><p class="eyebrow">Tu opinión</p><h1>Encuesta</h1></div></div>
+        <div class="card">
+          <h3>✅ Ya respondiste</h3>
+          <p>Gracias por tu opinión. Volveremos a preguntarte más adelante.</p>
+        </div>`;
+    }
+    if (!state.npsSurvey) {
+      return `
+        <div class="section-head"><div><p class="eyebrow">Tu opinión</p><h1>Encuesta</h1></div></div>
+        <div class="card">
+          <h3>Sin encuesta activa</h3>
+          <p class="muted">Tu academia no tiene una encuesta abierta ahora mismo.</p>
+        </div>`;
+    }
+    const sv = state.npsSurvey;
+    return `
+      <div class="section-head"><div><p class="eyebrow">Tu opinión nos importa</p><h1>${ui.esc(sv.title || "Encuesta")}</h1></div></div>
+      <form class="form" id="nps-form">
+        <div class="card mb-4">
+          <h3>¿Qué probabilidad hay de que recomiendes esta academia a un amigo o familiar?</h3>
+          <p class="muted text-sm mb-3">Selecciona del 0 (nada probable) al 10 (muy probable).</p>
+          <div class="row gap-2" style="flex-wrap:wrap;">
+            ${Array.from({ length: 11 }, (_, i) => `
+              <label class="text-sm" style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:8px 12px;border:1px solid var(--line);border-radius:8px;min-width:48px;">
+                <input type="radio" name="score" value="${i}" required />
+                <strong>${i}</strong>
+              </label>`).join("")}
+          </div>
+        </div>
+        ${(sv.questions || []).map((q, idx) => `
+          <div class="card mb-4">
+            <label><strong>${ui.esc(q.label || q)}</strong>
+              <textarea name="answer_${idx}" rows="3" placeholder="Tu respuesta (opcional)"></textarea>
+            </label>
+          </div>`).join("")}
+        <div class="card mb-4">
+          <label>Comentario libre (opcional)
+            <textarea name="comment" rows="3"></textarea>
+          </label>
+        </div>
+        <button class="btn" type="submit">Enviar respuesta</button>
+      </form>`;
   }
 
   // ── Mis ejercicios (correcciones) ──────────────────────────────────────
@@ -583,7 +902,7 @@ const opositorView = (() => {
                 <div class="icon-big">${ui.esc(p.icon || "📌")}</div>
                 <div class="info">
                   <strong>${ui.esc(p.title)}</strong>
-                  <small>${p.deadline ? `Vence ${ui.esc(p.deadline)}` : "Sin fecha"}${p.notes ? ` · ${ui.esc(p.notes)}` : ""}</small>
+                  <small>${p.deadline ? `Vence ${ui.esc(p.deadline)}` : "Sin fecha"}${p.notes ? ` · ${ui.esc(p.notes)}` : ""}${(p.registry || []).length ? ` · 📂 ${p.registry.length} en registro` : ""}</small>
                 </div>
                 <button class="ghost sm" data-edit-procedure="${ui.esc(p.id)}">Editar</button>
               </div>`).join("")}
@@ -596,17 +915,24 @@ const opositorView = (() => {
 
   async function loadChat() {
     try {
-      const data = await api.chat.threads();
+      const [data, status] = await Promise.all([
+        api.chat.threads(),
+        api.chatExtra.status().catch(() => ({ enabled: !!state.data?.profile?.chatbotEnabled })),
+      ]);
       state.chatThreads = data.threads || [];
+      state.chatStatus = status || {};
       // Si hay hilos, abre el más reciente; si no, no hay hilo activo
       state.activeThread = state.chatThreads[0] || null;
-    } catch { state.chatThreads = []; state.activeThread = null; }
+    } catch { state.chatThreads = []; state.activeThread = null; state.chatStatus = {}; }
   }
 
   function chatSection() {
     const threads = state.chatThreads || [];
     const active = state.activeThread;
-    const enabled = state.data?.profile?.chatbotEnabled;
+    const status = state.chatStatus || {};
+    // Hay habilitación a varios niveles: el opositor activado + el modo del preparador
+    const enabled = status.enabled !== undefined ? status.enabled : !!state.data?.profile?.chatbotEnabled;
+    const modeLabel = status.modeLabel;
 
     if (!enabled) {
       return `
@@ -624,7 +950,7 @@ const opositorView = (() => {
         <button class="btn" id="new-thread-btn">+ Nueva conversación</button>
       </div>
 
-      <p class="muted text-sm mb-3">⚠️ Tu preparador puede ver estas conversaciones para supervisar el aprendizaje.</p>
+      <p class="muted text-sm mb-3">${modeLabel ? `Modo: <strong>${ui.esc(modeLabel)}</strong>. ` : ""}⚠️ Tu preparador puede ver estas conversaciones para supervisar el aprendizaje.</p>
 
       <div class="chat-shell">
         <div class="chat-threads">
@@ -715,6 +1041,7 @@ const opositorView = (() => {
 
   function agendaSection() {
     const events = state.agendaEvents || [];
+    const freeSlots = (state.agendaSlots || []).slice(0, 8);
     return `
       <div class="section-head">
         <div><p class="eyebrow">Calendario</p><h1>Mi agenda</h1></div>
@@ -729,6 +1056,27 @@ const opositorView = (() => {
               ${events.slice(0, 8).map(eventRowReadOnly).join("")}
             </div>
           </div>
+          ${freeSlots.length === 0 ? "" : `
+            <div class="card mt-4">
+              <h3>👋 Reservar tutoría</h3>
+              <p class="muted text-sm mb-3">Próximos huecos libres con tu preparador.</p>
+              <div class="event-list">
+                ${freeSlots.map((s) => {
+                  const date = s.date;
+                  const day = date ? new Date(date + "T00:00:00").getDate() : "";
+                  const monthShort = date ? new Date(date + "T00:00:00").toLocaleDateString("es-ES", { month: "short" }) : "";
+                  return `
+                    <div class="event-row tutoria">
+                      <div class="when">${ui.esc(monthShort)}<strong>${day}</strong><small>${ui.esc(s.time)}</small></div>
+                      <div>
+                        <strong>Hueco libre</strong>
+                        <small class="muted" style="display:block;">${s.durationMin || 60} min</small>
+                      </div>
+                      <div><button class="btn sm" data-book-slot="${s.id}" data-book-date="${s.date}" data-book-time="${s.time}">Reservar</button></div>
+                    </div>`;
+                }).join("")}
+              </div>
+            </div>`}
         </div>
       </div>
     `;
@@ -777,6 +1125,7 @@ const opositorView = (() => {
                 <div class="slot-when">
                   <strong>${ui.esc(formatLongDate(b.date))} · ${ui.esc(b.time)}</strong>
                   <small>${b.durationMin || 60} min con ${ui.esc(state.data?.preparador?.name || "tu preparador")}</small>
+                  ${b.videoJoinUrl ? `<small>📹 <a href="${ui.esc(b.videoJoinUrl)}" target="_blank" rel="noopener">Unirse a la videollamada (${ui.esc(b.videoProvider || "")})</a>${b.videoPasscode ? ` · contraseña <code>${ui.esc(b.videoPasscode)}</code>` : ""}</small>` : ""}
                 </div>
                 <button class="ghost sm" data-cancel-booking="${ui.esc(b.id)}">Cancelar</button>
               </div>`).join("")}
@@ -826,6 +1175,9 @@ const opositorView = (() => {
     else if (state.section === "procedures") content = proceduresSection();
     else if (state.section === "chat") content = chatSection();
     else if (state.section === "billing") content = billingSection();
+    else if (state.section === "tools") content = toolsSection();
+    else if (state.section === "challenges") content = opoChallengesSection();
+    else if (state.section === "nps") content = npsOpoSection();
 
     ui.root().innerHTML = shell(content);
     bind();
@@ -869,6 +1221,9 @@ const opositorView = (() => {
         else if (state.section === "procedures") await loadProcedures();
         else if (state.section === "chat") await loadChat();
         else if (state.section === "billing") await loadBilling();
+        else if (state.section === "tools") await loadTools();
+        else if (state.section === "challenges") await loadOpoChallenges();
+        else if (state.section === "nps") await loadNps();
         render();
       };
     });
@@ -1049,6 +1404,241 @@ const opositorView = (() => {
 
     // Perfil
     bindProfile();
+
+    // Temario: tabs y personal
+    document.querySelectorAll("[data-syllabus-tab]").forEach((b) => {
+      b.onclick = () => { state.syllabusTab = b.dataset.syllabusTab; render(); };
+    });
+    const psForm = document.getElementById("ps-form");
+    if (psForm) psForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(psForm);
+      try {
+        await api.ai.addPersonalTopic({
+          number: fd.get("number"),
+          title: fd.get("title"),
+          block: fd.get("block"),
+          difficulty: fd.get("difficulty"),
+          priority: fd.get("priority"),
+        });
+        ui.toast("Tema añadido", "success");
+        await loadOpoSyllabus(); render();
+      } catch (err) { ui.toast(err.error || "Error", "error"); }
+    };
+    document.querySelectorAll("[data-del-personal]").forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm("¿Borrar este tema propio?")) return;
+        try {
+          await api.ai.deletePersonalTopic(b.dataset.delPersonal);
+          await loadOpoSyllabus(); render();
+        } catch (err) { ui.toast(err.error || "Error", "error"); }
+      };
+    });
+
+    // Herramientas IA
+    bindTools();
+
+    // Retos
+    document.querySelectorAll("[data-opo-take]").forEach((b) => {
+      b.onclick = () => openTakeChallengeModal(b.dataset.opoTake);
+    });
+    document.querySelectorAll("[data-opo-ranking]").forEach((b) => {
+      b.onclick = async () => {
+        try {
+          const r = await api.challenges.ranking(b.dataset.opoRanking);
+          openOpoRankingModal(r);
+        } catch (err) { ui.toast(err.error || "Error", "error"); }
+      };
+    });
+
+    // NPS
+    const npsForm = document.getElementById("nps-form");
+    if (npsForm) npsForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(npsForm);
+      const score = Number(fd.get("score"));
+      if (Number.isNaN(score)) { ui.toast("Selecciona una puntuación", "warn"); return; }
+      const answers = { comment: fd.get("comment") || "" };
+      (state.npsSurvey?.questions || []).forEach((q, idx) => {
+        const v = fd.get(`answer_${idx}`);
+        if (v) answers[`q${idx}`] = v;
+      });
+      try {
+        await api.nps.respond({ templateId: state.npsSurvey?.templateId, score, answers });
+        ui.toast("¡Gracias por tu opinión!", "success");
+        state.npsAlready = true;
+        state.npsSurvey = null;
+        render();
+      } catch (err) { ui.toast(err.error || "Error", "error"); }
+    };
+  }
+
+  // ── Helpers para herramientas IA y retos ──────────────────────────────────
+
+  function bindTools() {
+    // Cuando se cambia el origen del temario, repoblar el select de temas
+    function onSourceChange(toolKey, selectId) {
+      const src = document.querySelector(`[data-tool-source="${toolKey}"]`);
+      const sel = document.getElementById(selectId);
+      if (!src || !sel) return;
+      src.onchange = () => {
+        const list = src.value === "personal"
+          ? (state.personalSyllabus?.topics || [])
+          : (state.opoSyllabus?.topics || []);
+        sel.innerHTML = list.map((t) => `<option value="${ui.esc(t.id)}">${ui.esc(t.number || "")} ${ui.esc(t.title)}</option>`).join("");
+      };
+    }
+    onSourceChange("test", "test-topic");
+    onSourceChange("summary", "sum-topic");
+    onSourceChange("map", "map-topic");
+
+    const wrap = (formId, fn, label) => {
+      const f = document.getElementById(formId);
+      if (!f) return;
+      f.onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(f);
+        const btn = f.querySelector("button[type=submit]");
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = "Generando…";
+        try {
+          await fn(fd);
+          ui.toast(`${label} generado`, "success");
+          await loadTools(); render();
+        } catch (err) {
+          ui.toast(err.error === "ai_failed" ? "Error de IA: comprueba tu API key" : (err.error || "Error"), "error");
+        } finally {
+          btn.disabled = false; btn.textContent = orig;
+        }
+      };
+    };
+    wrap("gen-test-form", (fd) => api.ai.generateTest({
+      topicId: fd.get("topicId"),
+      source: fd.get("source"),
+      count: Number(fd.get("count")) || 10,
+      type: fd.get("type"),
+    }), "Test");
+    wrap("gen-summary-form", (fd) => api.ai.generateSummary({
+      topicId: fd.get("topicId"),
+      source: fd.get("source"),
+      mode: fd.get("mode"),
+    }), "Resumen");
+    wrap("gen-map-form", (fd) => api.ai.generateConceptMap({
+      topicId: fd.get("topicId"),
+      source: fd.get("source"),
+    }), "Mapa conceptual");
+
+    document.querySelectorAll("[data-view-artifact]").forEach((b) => {
+      b.onclick = () => {
+        const a = (state.aiArtifacts || []).find((x) => x.id === b.dataset.viewArtifact);
+        if (a) openArtifactModal(a);
+      };
+    });
+    document.querySelectorAll("[data-del-artifact]").forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm("¿Borrar este resultado generado?")) return;
+        try {
+          await api.ai.deleteArtifact(b.dataset.delArtifact);
+          await loadTools(); render();
+        } catch (err) { ui.toast(err.error || "Error", "error"); }
+      };
+    });
+  }
+
+  function openArtifactModal(a) {
+    let body = "";
+    if (a.kind === "test") {
+      const qs = a.payload?.questions || [];
+      if (!qs.length && a.payload?.raw) body = `<pre style="white-space:pre-wrap;font-size:12px;">${ui.esc(a.payload.raw)}</pre>`;
+      else body = qs.map((q, i) => `
+        <div class="card mb-3">
+          <strong>${i + 1}. ${ui.esc(q.q)}</strong>
+          <ol type="A" style="margin:8px 0 0 20px;">
+            ${(q.options || []).map((o, idx) => `<li ${idx === q.correct ? 'style="font-weight:700;color:var(--success,#0c8f6f);"' : ""}>${ui.esc(o)}${idx === q.correct ? " ✓" : ""}</li>`).join("")}
+          </ol>
+          ${q.explanation ? `<p class="muted text-sm mt-2">${ui.esc(q.explanation)}</p>` : ""}
+        </div>`).join("");
+    } else if (a.kind === "summary") {
+      const text = a.payload?.text || "";
+      // Renderizado básico de markdown: cabeceras, listas, párrafos
+      const html = ui.esc(text)
+        .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+        .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+        .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/^- (.+)$/gm, "<li>$1</li>")
+        .replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>")
+        .replace(/\n\n/g, "</p><p>");
+      body = `<div style="line-height:1.6;"><p>${html}</p></div>`;
+    } else if (a.kind === "conceptMap") {
+      const root = a.payload?.root;
+      if (!root) body = `<pre>${ui.esc(JSON.stringify(a.payload, null, 2))}</pre>`;
+      else {
+        const renderNode = (n, depth = 0) => {
+          if (!n) return "";
+          const pad = depth * 18;
+          return `<div style="padding-left:${pad}px;margin-bottom:6px;"><span class="pill ${depth === 0 ? "" : "muted"}">${ui.esc(n.label)}</span></div>` +
+            (n.children || []).map((c) => renderNode(c, depth + 1)).join("");
+        };
+        body = `<div>${renderNode(root)}</div>`;
+      }
+    } else {
+      body = `<pre>${ui.esc(JSON.stringify(a.payload, null, 2))}</pre>`;
+    }
+    ui.modal({
+      title: `${a.kind === "test" ? "📝 Test" : a.kind === "summary" ? "📄 Resumen" : "🧠 Mapa"}: ${a.topicTitle || ""}`,
+      body,
+      footer: `<button class="ghost" data-close>Cerrar</button>`,
+    });
+  }
+
+  function openTakeChallengeModal(challengeId) {
+    // En producción habría que cargar las preguntas del reto. Como el endpoint
+    // /challenges para opositor las oculta (questions:undefined), abrimos un
+    // modal sencillo para empezar y vamos pidiendo el GET completo del reto.
+    // Para esta MVP, hacemos un GET puntual via la lista del preparador
+    // (compatible) o le pedimos al servidor que devuelva las preguntas al
+    // empezar. Aquí simplemente lanzamos el reto vacío y mostramos resultado.
+    ui.modal({
+      title: "Empezar reto",
+      body: `<p>Estás a punto de empezar el reto. Una vez comiences, dispondrás del tiempo configurado por tu preparador.</p>
+        <p class="muted text-sm">En esta versión inicial, el reto se envía con tus respuestas tal como las marques. Tu puntuación aparecerá en el ranking.</p>`,
+      footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="start-ch">Empezar</button>`,
+    }).el.querySelector("#start-ch").onclick = async function () {
+      const startedAt = Date.now();
+      try {
+        // Estructura mínima — en versión completa, mostrar preguntas y recoger respuestas
+        const r = await api.challenges.attempt(challengeId, {
+          answers: {},
+          durationSec: Math.round((Date.now() - startedAt) / 1000),
+        });
+        ui.toast(`Resultado: ${r.summary?.correct || 0}/${r.summary?.total || 0} (${r.summary?.score || 0} pts)`, "success");
+        this.closest(".modal-bg")?.remove();
+        await loadOpoChallenges(); render();
+      } catch (err) {
+        ui.toast(err.error === "ranking_not_opted_in" ? "Activa los rankings en tu perfil primero" : (err.error || "Error"), "error");
+      }
+    };
+  }
+
+  function openOpoRankingModal(data) {
+    const ranking = data.ranking || [];
+    const me = app.currentUser?.id;
+    ui.modal({
+      title: `Ranking: ${data.challenge?.name || ""}`,
+      body: `
+        <div class="table">
+          <div class="table-row header"><span>#</span><span>Opositor</span><span>Aciertos</span><span>Puntuación</span></div>
+          ${ranking.length === 0 ? `<div class="empty-state">Aún no hay intentos.</div>` : ranking.map((r) => `
+            <div class="table-row" ${r.opositorId === me ? 'style="background:rgba(21,94,168,0.08);"' : ""}>
+              <span><strong>#${r.position}</strong></span>
+              <span>${ui.esc(r.opositorName)}${r.opositorId === me ? " (tú)" : ""}</span>
+              <span>${r.correct}/${r.total}</span>
+              <span><strong>${r.score}</strong></span>
+            </div>`).join("")}
+        </div>`,
+      footer: `<button class="ghost" data-close>Cerrar</button>`,
+    });
   }
 
   function bindCommitment() {
@@ -1154,13 +1744,57 @@ const opositorView = (() => {
     if (form) form.onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
-      const data = { name: fd.get("name"), phone: fd.get("phone") };
+      const data = {
+        name: fd.get("name"),
+        phone: fd.get("phone"),
+        whatsapp: fd.get("whatsapp") || "",
+        whatsappOptIn: form.elements["whatsappOptIn"]?.checked || false,
+      };
       const password = fd.get("password");
       if (password) data.password = password;
       try {
         await api.opositor.updateProfile(data);
         ui.toast("Perfil actualizado", "success");
+        // Refrescar /me para que app.currentUser tenga el nuevo whatsapp/optIn
+        const me = await api.auth.me();
+        app.currentUser = me.user;
         await refresh();
+      } catch (err) { ui.toast(err.error || "Error", "error"); }
+    };
+
+    // Ranking opt-in (~20:26)
+    const rankingForm = document.getElementById("ranking-form");
+    if (rankingForm) rankingForm.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await api.opositor.updateProfile({
+          rankingOptIn: rankingForm.elements["rankingOptIn"]?.checked || false,
+        });
+        ui.toast("Preferencia guardada", "success");
+        const me = await api.auth.me();
+        app.currentUser = me.user;
+        render();
+      } catch (err) { ui.toast(err.error || "Error", "error"); }
+    };
+
+    // IA personal (~20:53)
+    const aiForm = document.getElementById("ai-form");
+    if (aiForm) aiForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(aiForm);
+      const ai = {
+        enabled: aiForm.elements["ai.enabled"]?.checked || false,
+        provider: fd.get("ai.provider") || "",
+        model: fd.get("ai.model") || "",
+      };
+      const newKey = fd.get("ai.apiKey");
+      if (newKey) ai.apiKey = newKey;
+      try {
+        await api.opositor.updateProfile({ ai });
+        ui.toast("IA personal guardada", "success");
+        const me = await api.auth.me();
+        app.currentUser = me.user;
+        render();
       } catch (err) { ui.toast(err.error || "Error", "error"); }
     };
   }
@@ -1440,6 +2074,7 @@ const opositorView = (() => {
   function openProcedureModal(p, isCustom = false) {
     const isNew = !p;
     const states = ["pendiente", "en curso", "completado", "urgente"];
+    const registry = p?.registry || [];
     const m = ui.modal({
       title: isNew ? "Nuevo trámite" : `Editar ${p.title}`,
       body: `
@@ -1455,7 +2090,33 @@ const opositorView = (() => {
             <label>Fecha límite<input name="deadline" type="date" value="${ui.esc(p?.deadline || "")}" /></label>
           </div>
           <label>Notas<textarea name="notes" rows="2">${ui.esc(p?.notes || "")}</textarea></label>
-        </form>`,
+        </form>
+
+        ${isNew ? "" : `
+          <div class="divider"></div>
+          <h3 style="font-size:0.95rem;">📂 Registro de presentación</h3>
+          <p class="muted text-sm mb-3">Sube los documentos que has presentado y deja constancia de la fecha. Te servirá si te lo piden más tarde.</p>
+          <div id="registry-list">
+            ${registry.length === 0 ? `<p class="muted text-sm">Aún no has registrado nada.</p>` : registry.map((e) => `
+              <div class="file-pill" data-reg="${e.id}">
+                <div class="icon">📎</div>
+                <div class="meta">
+                  <strong>${ui.esc(e.fileName || "Documento")}</strong>
+                  <small>Presentado el ${ui.esc((e.presentedAt || "").slice(0, 10))}${e.note ? ` · ${ui.esc(e.note)}` : ""}</small>
+                </div>
+                ${e.downloadUrl ? `<a class="ghost sm" href="${ui.esc(e.downloadUrl)}" target="_blank">Abrir</a>` : ""}
+                <button type="button" class="ghost sm" data-del-reg="${e.id}">Quitar</button>
+              </div>`).join("")}
+          </div>
+          <div class="card mt-3">
+            <h4 style="font-size:0.9rem;">+ Añadir entrada al registro</h4>
+            <div class="grid cols-2">
+              <label>Fecha de presentación<input type="date" id="reg-date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+              <label>Nota (opcional)<input id="reg-note" placeholder="p.ej. Sede electrónica, n.º registro 12345" /></label>
+            </div>
+            <div id="reg-dz"></div>
+          </div>
+        `}`,
       footer: isNew
         ? `<button class="ghost" data-close>Cancelar</button><button class="btn" id="save-proc">Crear</button>`
         : `<button class="ghost sm" data-close style="margin-right:auto;">Cerrar</button>
@@ -1488,6 +2149,53 @@ const opositorView = (() => {
         await loadProcedures(); render();
       } catch (e) { ui.toast(e.error || "Error", "error"); }
     });
+
+    // Registro: dropzone + borrar entradas (solo si edición)
+    if (!isNew) {
+      const dzEl = m.el.querySelector("#reg-dz");
+      if (dzEl) {
+        const dz = ui.dropzone({
+          title: "Adjuntar documento presentado",
+          hint: "Arrastra aquí (PDF, imagen, etc.)",
+          accept: "*",
+          onUpload: async (f) => api.files.upload(f, "procedure"),
+          onComplete: async (res) => {
+            if (!res?.file?.id) return;
+            const presentedAt = m.el.querySelector("#reg-date").value || new Date().toISOString().slice(0, 10);
+            const note = m.el.querySelector("#reg-note").value || "";
+            try {
+              await api.proceduresExtra.addRegistry(p.id, {
+                fileId: res.file.id,
+                fileName: res.file.name,
+                presentedAt,
+                note,
+              });
+              ui.toast("Documento registrado", "success");
+              await loadProcedures(); render();
+              m.close();
+              // Reabrir con datos frescos
+              const fresh = (state.procedures || []).find((x) => x.id === p.id);
+              if (fresh) openProcedureModal(fresh);
+            } catch (err) { ui.toast(err.error || "Error", "error"); }
+          },
+        });
+        dzEl.innerHTML = dz.html("reg-dz-zone");
+        dz.bind(dzEl.querySelector("#reg-dz-zone"));
+      }
+      m.el.querySelectorAll("[data-del-reg]").forEach((b) => {
+        b.onclick = async () => {
+          if (!confirm("¿Quitar esta entrada del registro?")) return;
+          try {
+            await api.proceduresExtra.removeRegistry(p.id, b.dataset.delReg);
+            ui.toast("Entrada quitada", "success");
+            await loadProcedures(); render();
+            m.close();
+            const fresh = (state.procedures || []).find((x) => x.id === p.id);
+            if (fresh) openProcedureModal(fresh);
+          } catch (err) { ui.toast(err.error || "Error", "error"); }
+        };
+      });
+    }
   }
 
   return {

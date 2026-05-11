@@ -1,12 +1,8 @@
 const express = require("express");
 const db = require("../lib/db");
 const auth = require("../middleware/auth");
+const passwords = require("../lib/passwords");
 const { regeneratePlanFor } = require("../lib/replan");
-const crypto = require("crypto");
-
-function hash(password) {
-  return crypto.createHash("sha256").update(`opoplan:${password}`).digest("hex");
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Rutas específicas para preparador y opositor.
@@ -90,7 +86,80 @@ module.exports = function rolesRoutes() {
     res.json({ topic });
   });
 
+  // Ver compromiso/plan de un opositor concreto (transcripción ~20:38)
+  r.get("/preparador/opositores/:id/commitment", auth.requireRole("preparador", "admin", "superadmin"), (req, res) => {
+    const orgId = req.user.organizationId;
+    const opositorId = req.params.id;
+    // El preparador solo puede ver opositores asignados
+    if (req.user.role === "preparador") {
+      const a = db.findOne("assignments", (x) => x.preparadorId === req.user.id && x.opositorId === opositorId && x.active);
+      if (!a) return res.status(403).json({ error: "forbidden" });
+    }
+    const opo = db.findOne("users", (u) => u.id === opositorId && u.organizationId === orgId);
+    if (!opo) return res.status(404).json({ error: "not_found" });
+    const habits = db.find("habits", (h) => h.opositorId === opositorId).slice(-30);
+    const plan = db.findOne("plans", (p) => p.opositorId === opositorId);
+    // Calcular días seguidos sin cumplir (para alerta de compromiso roto)
+    let brokenStreak = 0;
+    const today = new Date();
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const dStr = d.toISOString().slice(0, 10);
+      const h = habits.find((x) => x.date === dStr);
+      if (h && (h.planCompliance === "full" || h.planCompliance === "partial")) break;
+      if (h && h.planCompliance === "none") brokenStreak++;
+      else if (!h && i > 0) brokenStreak++;
+    }
+    res.json({
+      opositor: { id: opo.id, name: opo.name, email: opo.email, phone: opo.phone, photo: opo.photo },
+      commitment: opo.commitment || {},
+      habits,
+      plan: plan ? { id: plan.id, totalTasks: plan.tasks?.length || 0, doneTasks: (plan.tasks || []).filter((t) => t.done).length } : null,
+      brokenStreak,
+    });
+  });
+
+  // Configurar modo del chatbot (transcripción ~20:18) y otros ajustes
+  // del preparador (settings rápidos sin pasar por admin)
+  r.patch("/preparador/me", auth.requireRole("preparador"), (req, res) => {
+    const patch = {};
+    const allowed = ["chatbotMode", "inactivitySettings", "ai"];
+    for (const k of allowed) {
+      if (req.body[k] !== undefined) patch[k] = req.body[k];
+    }
+    if (!Object.keys(patch).length) return res.status(400).json({ error: "nothing_to_update" });
+    db.update("users", (u) => u.id === req.user.id, patch);
+    const out = { ...db.findOne("users", (u) => u.id === req.user.id) };
+    delete out.passwordHash;
+    if (out.ai && out.ai.apiKey) out.ai = { ...out.ai, apiKey: "********" };
+    res.json({ user: out });
+  });
+
   // ── Opositor ───────────────────────────────────────────────────────────────
+
+  // Opositor accede a los temarios publicados por su preparador asignado.
+  // Esto es necesario porque /preparador/syllabi requiere rol preparador.
+  r.get("/opositor/syllabi", auth.requireRole("opositor", "admin", "superadmin"), (req, res) => {
+    const oposId = req.user.role === "opositor" ? req.user.id : req.query.opositorId;
+    if (!oposId) return res.json({ syllabi: [] });
+    const assignment = db.findOne("assignments", (a) => a.opositorId === oposId && a.active);
+    if (!assignment) return res.json({ syllabi: [] });
+    const syllabi = db.find("syllabi", (s) =>
+      s.preparadorId === assignment.preparadorId
+      && s.organizationId === req.user.organizationId);
+    // Resolvemos los adjuntos a metadata útil
+    const expanded = syllabi.map((s) => ({
+      ...s,
+      topics: (s.topics || []).map((t) => ({
+        ...t,
+        attachments: (t.attachments || []).map((a) => ({
+          ...a,
+          downloadUrl: `/api/files/download/${a.fileId}`,
+        })),
+      })),
+    }));
+    res.json({ syllabi: expanded });
+  });
 
   r.get("/opositor/dashboard", auth.requireRole("opositor", "admin", "superadmin", "preparador"), (req, res) => {
     const oposId = req.user.role === "opositor" ? req.user.id : req.query.opositorId;
@@ -104,6 +173,10 @@ module.exports = function rolesRoutes() {
     const assessments = db.find("assessments", (a) => a.opositorId === oposId);
     const habits = db.find("habits", (h) => h.opositorId === oposId);
     const materials = db.find("materials", (m) => m.opositorId === oposId || (!m.opositorId && m.organizationId === opo.organizationId));
+    // Lista de IDs de temarios visibles para el opositor (los del preparador asignado)
+    const syllabusIds = preparador
+      ? db.find("syllabi", (s) => s.preparadorId === preparador.id).map((s) => s.id)
+      : [];
 
     res.json({
       profile: {
@@ -123,6 +196,7 @@ module.exports = function rolesRoutes() {
       assessments,
       habits,
       materials,
+      syllabusIds,
     });
   });
 
@@ -164,16 +238,29 @@ module.exports = function rolesRoutes() {
     res.json({ user: out });
   });
 
-  // Editar datos básicos de perfil (nombre, teléfono, contraseña)
+  // Editar datos básicos de perfil (nombre, teléfono, contraseña, whatsapp, IA)
   r.patch("/opositor/profile", auth.requireAuth, (req, res) => {
     const patch = {};
     if (req.body.name) patch.name = req.body.name;
     if (req.body.phone !== undefined) patch.phone = req.body.phone;
-    if (req.body.password) patch.passwordHash = hash(req.body.password);
+    if (req.body.whatsapp !== undefined) patch.whatsapp = req.body.whatsapp;
+    if (req.body.whatsappOptIn !== undefined) patch.whatsappOptIn = !!req.body.whatsappOptIn;
+    if (req.body.rankingOptIn !== undefined) patch.rankingOptIn = !!req.body.rankingOptIn;
+    if (req.body.ai !== undefined) {
+      // Si llega apiKey enmascarada (********) la ignoramos
+      const ai = { ...(req.user.ai || {}), ...req.body.ai };
+      if (ai.apiKey === "********") delete ai.apiKey;
+      patch.ai = ai;
+    }
+    if (req.body.password) {
+      patch.passwordHash = passwords.hash(req.body.password);
+      patch.mustChangePassword = false;
+    }
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: "nothing_to_update" });
     db.update("users", (u) => u.id === req.user.id, patch);
     const out = { ...db.findOne("users", (u) => u.id === req.user.id) };
     delete out.passwordHash;
+    if (out.ai && out.ai.apiKey) out.ai = { ...out.ai, apiKey: "********" };
     res.json({ user: out });
   });
 

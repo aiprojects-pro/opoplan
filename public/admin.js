@@ -61,12 +61,13 @@ const adminView = (() => {
             <div><strong style="color:white;">${ui.esc(orgName)}</strong><small>${ui.esc(state.org?.branding?.tagline || "Panel de administración")}</small></div>
           </div>
           <div class="org-badge"><strong>${ui.esc(app.currentUser.name)}</strong>Administradora · ${ui.esc(app.currentUser.email)}</div>
+          <button data-section="config" class="ghost sm" style="margin:0 14px 12px;width:calc(100% - 28px);${state.section === "config" ? "border-color:var(--brand);color:var(--brand);" : ""}">⚙️ Configuración</button>
           <nav class="nav">
             <button data-section="dashboard" ${state.section === "dashboard" ? 'class="active"' : ""}>📊 Resumen</button>
             <button data-section="users" ${state.section === "users" ? 'class="active"' : ""}>👥 Usuarios y roles</button>
             <button data-section="assignments" ${state.section === "assignments" ? 'class="active"' : ""}>🔗 Asignaciones</button>
             <button data-section="plans" ${state.section === "plans" ? 'class="active"' : ""}>💳 Planes y suscripciones</button>
-            <button data-section="config" ${state.section === "config" ? 'class="active"' : ""}>⚙️ Configuración</button>
+            <button data-section="nps" ${state.section === "nps" ? 'class="active"' : ""}>📊 Encuesta NPS</button>
           </nav>
           <div class="sidebar-footer">
             <button class="ghost" id="logout-btn">Cerrar sesión</button>
@@ -87,7 +88,7 @@ const adminView = (() => {
       </div>
       <div class="grid cols-4 mb-4">
         <div class="card metric"><span class="label">Usuarios</span><strong>${t.users || 0}</strong><span class="muted text-xs">${t.opositores || 0} opositores · ${t.preparadores || 0} preparadores</span></div>
-        <div class="card metric"><span class="label">Suscripciones activas</span><strong>${t.activeSubscriptions || 0}</strong></div>
+        <div class="card metric"><span class="label">Cuentas activas</span><strong>${t.activeAccounts ?? t.activeSubscriptions ?? 0}</strong><span class="muted text-xs">${t.activeSubscriptions || 0} suscripciones + admin</span></div>
         <div class="card metric"><span class="label">Ingresos mensuales</span><strong>${ui.formatEUR(t.monthlyRevenue)}</strong></div>
         <div class="card metric"><span class="label">Correcciones pendientes</span><strong>${t.pendingCorrections || 0}</strong></div>
       </div>
@@ -119,7 +120,10 @@ const adminView = (() => {
     return `
       <div class="section-head">
         <div><p class="eyebrow">Equipo y alumnos</p><h1>Usuarios y roles</h1></div>
-        <button class="btn" id="new-user">+ Nuevo usuario</button>
+        <div class="row gap-2">
+          <button class="ghost" id="bulk-users">📥 Carga masiva CSV</button>
+          <button class="btn" id="new-user">+ Nuevo usuario</button>
+        </div>
       </div>
       ${["admin", "preparador", "opositor"]
         .map(
@@ -221,19 +225,27 @@ const adminView = (() => {
 
       <div class="card mb-4">
         <h2>Planes globales (plataforma)</h2>
-        <p class="muted text-sm mb-4">Disponibles para todas las academias. No editables desde aquí.</p>
+        <p class="muted text-sm mb-4">Disponibles para todas las academias. Puedes activar u ocultar cada plan globalmente desde aquí.</p>
         <div class="grid cols-3">
           ${state.plans.global
             .map(
-              (p) => `
-            <div class="card" style="border-color: var(--line-soft);">
-              <p class="eyebrow">${ui.esc(p.target)}</p>
+              (p) => {
+                const enabled = p.enabledForOrg !== false;
+                const subs = p.activeSubscribers || 0;
+                return `
+            <div class="card" style="border-color: var(--line-soft); ${enabled ? "" : "opacity:0.55;"}">
+              <div class="row">
+                <p class="eyebrow">${ui.esc(p.line || "oposiciones")} · ${ui.esc(p.target)}</p>
+                <button class="ghost sm" data-toggle-global="${p.id}">${enabled ? "Ocultar" : "Activar"}</button>
+              </div>
               <h3>${ui.esc(p.name)}</h3>
               <div style="font-size: 1.4rem; font-weight: 800; margin: 8px 0;">${ui.formatEUR(p.price)}<small class="muted" style="font-weight:500;">/mes</small></div>
+              ${subs ? `<div class="pill success" style="margin-bottom:8px;">${subs} suscriptor${subs === 1 ? "" : "es"}</div>` : ""}
               <ul style="padding-left: 18px; font-size: 0.82rem; color: var(--muted); margin: 0;">
                 ${(p.features || []).map((f) => `<li>${ui.esc(f)}</li>`).join("")}
               </ul>
-            </div>`,
+            </div>`;
+              },
             )
             .join("")}
         </div>
@@ -283,11 +295,16 @@ const adminView = (() => {
   // ── Configuración (con tabs) ──────────────────────────────────────────────
 
   function configSection() {
+    // Reorganizado según transcripción ~20:02
     const tabs = [
       { id: "branding", label: "Marca" },
       { id: "contact", label: "Contacto" },
       { id: "billing", label: "Datos fiscales" },
-      { id: "integrations", label: "Integraciones" },
+      { id: "comms", label: "Email y Moodle" },
+      { id: "payments", label: "Pagos" },
+      { id: "ai_storage", label: "Almacenamiento e IA" },
+      { id: "videoconf", label: "Videoconferencia" },
+      { id: "defaults", label: "Avisos y defaults" },
       { id: "legal", label: "Legal" },
     ];
     return `
@@ -304,8 +321,14 @@ const adminView = (() => {
     if (state.configTab === "branding") return configBranding();
     if (state.configTab === "contact") return configContact();
     if (state.configTab === "billing") return configBilling();
-    if (state.configTab === "integrations") return configIntegrations();
+    if (state.configTab === "comms") return configComms();
+    if (state.configTab === "payments") return configPayments();
+    if (state.configTab === "ai_storage") return configAiStorage();
+    if (state.configTab === "videoconf") return configVideoconf();
+    if (state.configTab === "defaults") return configDefaults();
     if (state.configTab === "legal") return configLegal();
+    // Compatibilidad con el viejo tab integrations
+    if (state.configTab === "integrations") return configIntegrations();
     return "";
   }
 
@@ -476,6 +499,216 @@ const adminView = (() => {
       </form>`;
   }
 
+  // ── Sub-secciones de configuración (transcripción ~20:02) ──────────────────
+
+  // Email + Moodle: mensajería con el alumno
+  function configComms() {
+    const i = state.org?.integrations || {};
+    return `
+      <form class="form" id="comms-form">
+        <div class="grid cols-2">
+          <div class="card">
+            <h3>📧 Email</h3>
+            <p class="muted text-sm mb-2">Si lo activas, los emails de la plataforma se envían desde tu dominio.</p>
+            <label class="text-sm"><input type="checkbox" name="email.enabled" ${i.email?.enabled ? "checked" : ""} /> Usar mi propio servicio de email</label>
+            <label>Proveedor
+              <select name="email.provider">
+                <option value="resend" ${i.email?.provider === "resend" ? "selected" : ""}>Resend (recomendado)</option>
+                <option value="smtp" ${i.email?.provider === "smtp" ? "selected" : ""}>SMTP</option>
+              </select>
+            </label>
+            <label>API key (Resend) o contraseña SMTP<input name="email.apiKey" type="password" value="${ui.esc(i.email?.apiKey || "")}" /></label>
+            <label>Remitente "From"<input name="email.from" value="${ui.esc(i.email?.from || "")}" placeholder="Mi Academia &lt;noreply@mi-academia.es&gt;" /></label>
+          </div>
+          <div class="card">
+            <h3>🎓 Moodle</h3>
+            <p class="muted text-sm mb-2">Sincronización con tu instancia Moodle (alumnos, cursos, materiales).</p>
+            <label class="text-sm"><input type="checkbox" name="moodle.enabled" ${i.moodle?.enabled ? "checked" : ""} /> Sincronizar con Moodle</label>
+            <label>URL base<input name="moodle.baseUrl" value="${ui.esc(i.moodle?.baseUrl || "")}" placeholder="https://campus.mi-academia.es" /></label>
+            <label>Client ID<input name="moodle.clientId" value="${ui.esc(i.moodle?.clientId || "")}" /></label>
+            <label>Client Secret<input name="moodle.clientSecret" type="password" value="${ui.esc(i.moodle?.clientSecret || "")}" /></label>
+          </div>
+        </div>
+        <div class="row mt-4"><span class="muted">Si dejas algo desactivado se usa la configuración global.</span><button class="btn" type="submit">Guardar email y Moodle</button></div>
+      </form>`;
+  }
+
+  // Pagos: Stripe + Redsys
+  function configPayments() {
+    const i = state.org?.integrations || {};
+    return `
+      <form class="form" id="payments-form">
+        <div class="grid cols-2">
+          <div class="card">
+            <h3>💳 Stripe</h3>
+            <p class="muted text-sm mb-2">Pasarela internacional, recomendada para suscripciones.</p>
+            <label class="text-sm"><input type="checkbox" name="stripe.enabled" ${i.stripe?.enabled ? "checked" : ""} /> Activar Stripe propio</label>
+            <label>Publishable key<input name="stripe.publishableKey" value="${ui.esc(i.stripe?.publishableKey || "")}" placeholder="pk_test_…" /></label>
+            <label>Secret key<input name="stripe.secretKey" type="password" value="${ui.esc(i.stripe?.secretKey || "")}" placeholder="sk_test_…" /></label>
+            <label>Webhook secret<input name="stripe.webhookSecret" type="password" value="${ui.esc(i.stripe?.webhookSecret || "")}" placeholder="whsec_…" /></label>
+            <p class="help">Modo test: las claves empiezan por <code>sk_test_</code>.</p>
+          </div>
+          <div class="card">
+            <h3>🇪🇸 Redsys (TPV)</h3>
+            <p class="muted text-sm mb-2">TPV virtual para academias en España.</p>
+            <label class="text-sm"><input type="checkbox" name="redsys.enabled" ${i.redsys?.enabled ? "checked" : ""} /> Activar Redsys</label>
+            <label>Código comercio<input name="redsys.merchantCode" value="${ui.esc(i.redsys?.merchantCode || "")}" /></label>
+            <label>Terminal<input name="redsys.terminal" value="${ui.esc(i.redsys?.terminal || "1")}" /></label>
+            <label>Clave secreta<input name="redsys.secretKey" type="password" value="${ui.esc(i.redsys?.secretKey || "")}" /></label>
+            <label>Entorno
+              <select name="redsys.environment">
+                <option value="sandbox" ${i.redsys?.environment === "sandbox" ? "selected" : ""}>Sandbox</option>
+                <option value="production" ${i.redsys?.environment === "production" ? "selected" : ""}>Producción</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="row mt-4"><span class="muted">Puedes activar ambas pasarelas; el opositor elige al pagar.</span><button class="btn" type="submit">Guardar pagos</button></div>
+      </form>`;
+  }
+
+  // Almacenamiento + Chatbot (van juntos: ambos son backend "infraestructura")
+  function configAiStorage() {
+    const i = state.org?.integrations || {};
+    return `
+      <form class="form" id="ai-storage-form">
+        <div class="grid cols-2">
+          <div class="card">
+            <h3>☁️ Almacenamiento</h3>
+            <p class="muted text-sm mb-2">Bucket donde se guardan PDF, audios, vídeos y adjuntos.</p>
+            <label class="text-sm"><input type="checkbox" name="storage.enabled" ${i.storage?.enabled ? "checked" : ""} /> Usar mi propio bucket</label>
+            <label>Proveedor
+              <select name="storage.provider">
+                <option value="r2" ${i.storage?.provider === "r2" ? "selected" : ""}>Cloudflare R2 (recomendado)</option>
+                <option value="s3" ${i.storage?.provider === "s3" ? "selected" : ""}>AWS S3</option>
+              </select>
+            </label>
+            <label>Bucket<input name="storage.bucket" value="${ui.esc(i.storage?.bucket || "")}" /></label>
+            <label>Endpoint<input name="storage.endpoint" value="${ui.esc(i.storage?.endpoint || "")}" /></label>
+            <label>Access key<input name="storage.accessKeyId" value="${ui.esc(i.storage?.accessKeyId || "")}" /></label>
+            <label>Secret key<input name="storage.secretAccessKey" type="password" value="${ui.esc(i.storage?.secretAccessKey || "")}" /></label>
+          </div>
+          <div class="card">
+            <h3>🤖 Chatbot de academia</h3>
+            <p class="muted text-sm mb-2">IA que responde dudas a los opositores. El coste de la API lo asume la academia.</p>
+            <label class="text-sm"><input type="checkbox" name="ai.enabled" ${i.ai?.enabled ? "checked" : ""} /> Usar mi propia API</label>
+            <label>Proveedor
+              <select name="ai.provider">
+                <option value="gemini" ${i.ai?.provider === "gemini" ? "selected" : ""}>Google Gemini (free tier)</option>
+                <option value="openai" ${i.ai?.provider === "openai" ? "selected" : ""}>OpenAI (ChatGPT)</option>
+                <option value="anthropic" ${i.ai?.provider === "anthropic" ? "selected" : ""}>Anthropic (Claude)</option>
+              </select>
+            </label>
+            <label>API key<input name="ai.apiKey" type="password" value="${ui.esc(i.ai?.apiKey || "")}" /></label>
+            <label>Modelo<input name="ai.model" value="${ui.esc(i.ai?.model || "gemini-1.5-flash")}" /></label>
+            <p class="help">Cada preparador puede además forzar un modo (supervisado / automático) en sus alumnos.</p>
+          </div>
+        </div>
+        <div class="row mt-4"><span class="muted">El opositor también puede conectar su propia IA en su perfil.</span><button class="btn" type="submit">Guardar almacenamiento e IA</button></div>
+      </form>`;
+  }
+
+  // Videoconferencia (~20:11)
+  function configVideoconf() {
+    const v = state.org?.integrations?.videoconference || {};
+    return `
+      <form class="form" id="videoconf-form">
+        <div class="card">
+          <h3>📹 Videoconferencia para tutorías</h3>
+          <p class="muted text-sm mb-3">Se generará automáticamente un enlace al confirmar cada tutoría.</p>
+          <label>Proveedor
+            <select name="videoconference.provider">
+              <option value="" ${!v.provider ? "selected" : ""}>— Sin integración (enlace manual)</option>
+              <option value="zoom" ${v.provider === "zoom" ? "selected" : ""}>Zoom</option>
+              <option value="meet" ${v.provider === "meet" ? "selected" : ""}>Google Meet</option>
+              <option value="teams" ${v.provider === "teams" ? "selected" : ""}>Microsoft Teams</option>
+              <option value="jitsi" ${v.provider === "jitsi" ? "selected" : ""}>Jitsi (auto-hospedado)</option>
+            </select>
+          </label>
+          <label>API key / Client ID<input name="videoconference.apiKey" type="password" value="${ui.esc(v.apiKey || "")}" /></label>
+          <label>Client secret / API secret<input name="videoconference.clientSecret" type="password" value="${ui.esc(v.clientSecret || "")}" /></label>
+          <label>Cuenta / dominio<input name="videoconference.accountId" value="${ui.esc(v.accountId || "")}" placeholder="opcional, p.ej. mi-empresa.zoom.us" /></label>
+        </div>
+        <div class="row mt-4"><span></span><button class="btn" type="submit">Guardar videoconferencia</button></div>
+      </form>`;
+  }
+
+  // Avisos automáticos por defecto: inactividad, compromiso, tutoría no consumida (~20:30, ~20:32, ~20:38)
+  function configDefaults() {
+    const d = state.org?.defaults || {};
+    const inactivity = d.inactivityReminder || { preset: "normal" };
+    const broken = d.brokenCommitmentEmail || { enabled: true, daysInARow: 3 };
+    const unconsumed = d.unconsumedTutoringEmail || { enabled: true };
+    return `
+      <form class="form" id="defaults-form">
+        <div class="card">
+          <h3>⏰ Recordatorio por inactividad</h3>
+          <p class="muted text-sm mb-3">Cada preparador puede luego ajustar el preset por opositor según fecha de examen.</p>
+          <label>Preset por defecto
+            <select name="inactivity.preset">
+              <option value="intensive" ${inactivity.preset === "intensive" ? "selected" : ""}>Intensivo — avisar a los 2 días</option>
+              <option value="normal" ${inactivity.preset === "normal" ? "selected" : ""}>Normal — avisar a los 7 días</option>
+              <option value="calm" ${inactivity.preset === "calm" ? "selected" : ""}>Tranquilo — avisar a los 15 días</option>
+              <option value="off" ${inactivity.preset === "off" ? "selected" : ""}>Desactivado</option>
+            </select>
+          </label>
+        </div>
+        <div class="card mt-4">
+          <h3>📉 Compromiso roto</h3>
+          <p class="muted text-sm mb-3">Avisa al preparador cuando un opositor lleva varios días seguidos sin cumplir.</p>
+          <label class="text-sm"><input type="checkbox" name="broken.enabled" ${broken.enabled ? "checked" : ""} /> Activado</label>
+          <label>Días seguidos sin cumplir<input type="number" name="broken.daysInARow" min="1" max="30" value="${broken.daysInARow || 3}" /></label>
+        </div>
+        <div class="card mt-4">
+          <h3>📅 Tutoría mensual sin consumir</h3>
+          <p class="muted text-sm mb-3">Aviso a fin de mes si el plan incluye tutoría y no se reservó ninguna.</p>
+          <label class="text-sm"><input type="checkbox" name="unconsumed.enabled" ${unconsumed.enabled ? "checked" : ""} /> Activado</label>
+        </div>
+        <div class="row mt-4"><span></span><button class="btn" type="submit">Guardar avisos</button></div>
+      </form>`;
+  }
+
+  // ── Encuesta NPS ───────────────────────────────────────────────────────────
+
+  function npsSection() {
+    const data = state.npsData || { responses: [], stats: {} };
+    const { stats, responses } = data;
+    const cat = (c) => ({ promoter: "Promotor", passive: "Pasivo", detractor: "Detractor" }[c] || c);
+    const catColor = (c) => ({ promoter: "success", passive: "muted", detractor: "warn" }[c] || "muted");
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Voz del cliente</p><h1>Encuesta NPS</h1></div>
+        <div class="row gap-2">
+          <button class="ghost" id="nps-config">Configurar</button>
+          <button class="btn" id="nps-send">Enviar a opositores</button>
+        </div>
+      </div>
+      <div class="grid cols-4 mb-4">
+        <div class="card metric"><span class="label">Score NPS</span><strong style="color:${(stats.score || 0) >= 30 ? "var(--success, #0c8f6f)" : (stats.score || 0) < 0 ? "var(--danger, #c73c3c)" : "var(--muted)"};">${stats.score ?? "—"}</strong><span class="muted text-xs">${stats.total || 0} respuestas</span></div>
+        <div class="card metric"><span class="label">Promotores</span><strong>${stats.promoters || 0}</strong><span class="muted text-xs">9–10</span></div>
+        <div class="card metric"><span class="label">Pasivos</span><strong>${stats.passives || 0}</strong><span class="muted text-xs">7–8</span></div>
+        <div class="card metric"><span class="label">Detractores</span><strong>${stats.detractors || 0}</strong><span class="muted text-xs">0–6</span></div>
+      </div>
+      <div class="card">
+        <h2>Respuestas recibidas</h2>
+        <div class="table mt-4">
+          <div class="table-row header"><span>Opositor</span><span>Score</span><span>Categoría</span><span>Fecha</span><span>Comentario</span></div>
+          ${(responses || [])
+            .map(
+              (r) => `
+            <div class="table-row">
+              <span><strong>${ui.esc(r.opositorName || "(anónimo)")}</strong></span>
+              <span><strong>${r.score}/10</strong></span>
+              <span><span class="pill ${catColor(r.category)}">${cat(r.category)}</span></span>
+              <span><small class="muted">${ui.esc((r.respondedAt || "").slice(0, 10))}</small></span>
+              <span><small>${ui.esc(r.answers?.comment || "—")}</small></span>
+            </div>`,
+            )
+            .join("") || `<div class="empty-state">Aún no hay respuestas. Envíala a tus opositores.</div>`}
+        </div>
+      </div>`;
+  }
+
   function render() {
     let content = "";
     if (state.section === "dashboard") content = dashboardSection();
@@ -483,6 +716,7 @@ const adminView = (() => {
     else if (state.section === "assignments") content = assignmentsSection();
     else if (state.section === "plans") content = plansSection();
     else if (state.section === "config") content = configSection();
+    else if (state.section === "nps") content = npsSection();
     ui.root().innerHTML = shell(content);
     bind();
   }
@@ -499,6 +733,7 @@ const adminView = (() => {
 
     // Usuarios
     document.getElementById("new-user")?.addEventListener("click", openNewUserModal);
+    document.getElementById("bulk-users")?.addEventListener("click", openBulkUsersModal);
     main.querySelectorAll("[data-edit-user]").forEach((b) => {
       const u = state.users.find((x) => x.id === b.dataset.editUser);
       b.addEventListener("click", () => openEditUserModal(u));
@@ -525,6 +760,16 @@ const adminView = (() => {
       const p = state.plans.own.find((x) => x.id === b.dataset.editPlan);
       b.addEventListener("click", () => openPlanModal(p));
     });
+    main.querySelectorAll("[data-toggle-global]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try {
+          await api.adminExtra.togglePlanForOrg(b.dataset.toggleGlobal);
+          await refresh();
+        } catch (err) {
+          ui.toast(err.error || "Error", "error");
+        }
+      }),
+    );
 
     // Configuración: tabs
     main.querySelectorAll("[data-config-tab]").forEach((b) => {
@@ -533,6 +778,19 @@ const adminView = (() => {
         render();
       };
     });
+
+    // NPS
+    if (state.section === "nps") {
+      // Carga perezosa
+      if (!state.npsData) {
+        api.adminExtra.npsResponses().then((d) => {
+          state.npsData = d;
+          render();
+        }).catch(() => { state.npsData = { responses: [], stats: {} }; render(); });
+      }
+      document.getElementById("nps-config")?.addEventListener("click", openNpsConfigModal);
+      document.getElementById("nps-send")?.addEventListener("click", openNpsSendModal);
+    }
 
     // Configuración: forms
     bindConfigForms();
@@ -657,6 +915,68 @@ const adminView = (() => {
         });
         ui.toast("Datos legales actualizados", "success");
         await refresh();
+      };
+    }
+
+    // Helper genérico para los nuevos formularios de integraciones por secciones
+    function bindIntegrationsForm(formId, sections) {
+      const form = document.getElementById(formId);
+      if (!form) return;
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(form);
+        const out = {};
+        for (const [k, v] of fd.entries()) {
+          const [section, field] = k.split(".");
+          if (!out[section]) out[section] = {};
+          const el = form.elements[k];
+          if (el && el.type === "checkbox") out[section][field] = el.checked;
+          else out[section][field] = v;
+        }
+        for (const sec of sections) {
+          if (out[sec] && form.elements[`${sec}.enabled`]) {
+            out[sec].enabled = form.elements[`${sec}.enabled`].checked;
+          }
+        }
+        try {
+          await api.admin.updateOrg({ integrations: out });
+          ui.toast("Cambios guardados", "success");
+          await refresh();
+        } catch (err) {
+          ui.toast(err.error || "Error", "error");
+        }
+      };
+    }
+
+    bindIntegrationsForm("comms-form", ["email", "moodle"]);
+    bindIntegrationsForm("payments-form", ["stripe", "redsys"]);
+    bindIntegrationsForm("ai-storage-form", ["storage", "ai"]);
+    bindIntegrationsForm("videoconf-form", ["videoconference"]);
+
+    // Avisos por defecto (no van bajo "integrations" sino bajo "defaults")
+    const defaults = document.getElementById("defaults-form");
+    if (defaults) {
+      defaults.onsubmit = async (e) => {
+        e.preventDefault();
+        const fd = new FormData(defaults);
+        try {
+          await api.admin.updateOrg({
+            defaults: {
+              inactivityReminder: { preset: fd.get("inactivity.preset") },
+              brokenCommitmentEmail: {
+                enabled: defaults.elements["broken.enabled"].checked,
+                daysInARow: Number(fd.get("broken.daysInARow")) || 3,
+              },
+              unconsumedTutoringEmail: {
+                enabled: defaults.elements["unconsumed.enabled"].checked,
+              },
+            },
+          });
+          ui.toast("Avisos guardados", "success");
+          await refresh();
+        } catch (err) {
+          ui.toast(err.error || "Error", "error");
+        }
       };
     }
   }
@@ -806,6 +1126,122 @@ const adminView = (() => {
         await refresh();
       } catch (err) {
         ui.toast(err.error || "Error", "error");
+      }
+    };
+  }
+
+  // ── Encuesta NPS: modales ──────────────────────────────────────────────────
+
+  function openNpsConfigModal() {
+    const nps = state.org?.nps || { enabled: false, template: "nps_classic", cooldownDays: 90 };
+    const m = ui.modal({
+      title: "Configurar encuesta NPS",
+      body: `
+        <form class="form" id="nps-config-form">
+          <label class="text-sm"><input type="checkbox" name="enabled" ${nps.enabled ? "checked" : ""} /> Activar encuesta NPS para esta academia</label>
+          <label>Plantilla
+            <select name="template">
+              <option value="nps_classic" ${nps.template === "nps_classic" ? "selected" : ""}>Clásica (1 pregunta + comentario)</option>
+              <option value="nps_extended" ${nps.template === "nps_extended" ? "selected" : ""}>Extendida (con sub-preguntas)</option>
+            </select>
+          </label>
+          <label>Periodo entre envíos (días)<input type="number" name="cooldownDays" min="7" max="365" value="${nps.cooldownDays || 90}" /></label>
+          <p class="help">Si un opositor ya respondió, no recibirá otra hasta que pasen estos días.</p>
+        </form>`,
+      footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="save">Guardar</button>`,
+    });
+    m.el.querySelector("#save").onclick = async () => {
+      const fd = new FormData(m.el.querySelector("#nps-config-form"));
+      try {
+        await api.admin.updateOrg({
+          nps: {
+            enabled: m.el.querySelector("[name=enabled]").checked,
+            template: fd.get("template"),
+            cooldownDays: Number(fd.get("cooldownDays")) || 90,
+          },
+        });
+        ui.toast("Configuración guardada", "success");
+        m.close();
+        await refresh();
+      } catch (err) {
+        ui.toast(err.error || "Error", "error");
+      }
+    };
+  }
+
+  function openNpsSendModal() {
+    if (!state.org?.nps?.enabled) {
+      ui.toast("Activa primero la encuesta NPS en Configurar", "warn");
+      return;
+    }
+    const opositores = state.users.filter((u) => u.role === "opositor" && u.status === "active");
+    const m = ui.modal({
+      title: "Enviar encuesta NPS",
+      body: `
+        <form class="form" id="nps-send-form">
+          <p class="muted text-sm mb-3">Se enviará un email con un enlace para responder. Los que ya respondieron recientemente serán excluidos.</p>
+          <label>Audiencia
+            <select name="audience">
+              <option value="all">Todos los opositores activos (${opositores.length})</option>
+              <option value="recent">Solo los inscritos en los últimos 90 días</option>
+            </select>
+          </label>
+        </form>`,
+      footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="send">Enviar</button>`,
+    });
+    m.el.querySelector("#send").onclick = async () => {
+      const fd = new FormData(m.el.querySelector("#nps-send-form"));
+      try {
+        const r = await api.adminExtra.npsSend({ audience: fd.get("audience") });
+        ui.toast(`Enviada a ${r?.sent || 0} opositores`, "success");
+        m.close();
+        state.npsData = null; // refrescar
+        await refresh();
+      } catch (err) {
+        ui.toast(err.error || "Error al enviar", "error");
+      }
+    };
+  }
+
+  // ── Bulk upload de opositores (CSV) — transcripción ~20:06 ────────────────
+
+  function openBulkUsersModal() {
+    const m = ui.modal({
+      title: "Carga masiva de opositores (CSV)",
+      body: `
+        <div>
+          <p class="muted text-sm mb-3">Sube un CSV con cabeceras <code>name,email,phone,password</code>. Si no incluyes la contraseña, se generará una temporal.</p>
+          <textarea id="csv-data" rows="10" class="input" style="width:100%;font-family:monospace;font-size:12px;" placeholder="name,email,phone,password
+Lucía Martín,lucia@correo.es,+34600000001,
+Álvaro Ruiz,alvaro@correo.es,+34600000002,Cambiame123"></textarea>
+          <div class="row mt-3 gap-2">
+            <input type="file" accept=".csv,text/csv" id="csv-file" />
+            <small class="muted">o pega el CSV arriba</small>
+          </div>
+          <div id="bulk-result" class="mt-3"></div>
+        </div>`,
+      footer: `<button class="ghost" data-close>Cerrar</button><button class="btn" id="bulk-import">Importar</button>`,
+    });
+    m.el.querySelector("#csv-file").onchange = (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => { m.el.querySelector("#csv-data").value = String(reader.result || ""); };
+      reader.readAsText(f);
+    };
+    m.el.querySelector("#bulk-import").onclick = async () => {
+      const csv = m.el.querySelector("#csv-data").value.trim();
+      if (!csv) { ui.toast("Pega un CSV o selecciona un archivo", "warn"); return; }
+      try {
+        const r = await api.adminExtra.bulkUsers({ csv, role: "opositor" });
+        m.el.querySelector("#bulk-result").innerHTML = `
+          <div class="card" style="border-color:var(--success, #0c8f6f);">
+            <strong>✓ Importados: ${r.created || 0}</strong>
+            ${r.errors?.length ? `<br/><small class="muted">${r.errors.length} errores: ${ui.esc(r.errors.slice(0, 3).map((e) => e.email + ": " + e.error).join("; "))}</small>` : ""}
+          </div>`;
+        await refresh();
+      } catch (err) {
+        ui.toast(err.error || "Error al importar", "error");
       }
     };
   }

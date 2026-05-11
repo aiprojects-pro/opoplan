@@ -1205,3 +1205,140 @@ textarea { min-height: 88px; resize: vertical; }
 .plan-card .features li::before { content: "✓ "; color: var(--ok); font-weight: 800; }
 
 .hidden { display: none; }
+
+/* ─── Diferenciación visual por rol (transcripción ~20:28) ──────────────── */
+
+/* superadmin: morado oscuro corporativo */
+body.role-superadmin .sidebar {
+  background: linear-gradient(180deg, #2a1245, #160827);
+}
+body.role-superadmin .sidebar .org-badge {
+  background: rgba(170, 100, 255, 0.12);
+  border-left: 3px solid #a965ff;
+}
+
+/* admin (academia): azul (color por defecto) - sin override */
+
+/* preparador: verde profesor */
+body.role-preparador .sidebar {
+  background: linear-gradient(180deg, #0a3a2a, #051c14);
+}
+body.role-preparador .sidebar .brand-mark {
+  background: #0c8f6f !important;
+}
+body.role-preparador .sidebar .org-badge {
+  background: rgba(12, 143, 111, 0.18);
+  border-left: 3px solid #0c8f6f;
+}
+body.role-preparador .sidebar .nav button.active {
+  background: rgba(12, 143, 111, 0.22);
+  color: #67e3b6;
+}
+
+/* opositor: cálido (mantiene el color de la academia, pero con header
+   más claro para sentirlo más alegre y distinto del preparador) */
+body.role-opositor .sidebar {
+  background: linear-gradient(180deg, #1a3d6e, #08264a);
+}
+body.role-opositor .sidebar .org-badge {
+  background: rgba(255, 200, 70, 0.12);
+  border-left: 3px solid #ffc846;
+}
+
+/* Etiqueta visible junto al avatar de cada rol (en el sidebar) */
+body.role-preparador .org-badge::after {
+  content: "👨‍🏫 Preparador";
+  display: block;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: #67e3b6;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+body.role-opositor .org-badge::after {
+  content: "🎓 Opositor";
+  display: block;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: #ffc846;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+body.role-admin .org-badge::after {
+  content: "🏛️ Administrador";
+  display: block;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.75);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+body.role-superadmin .org-badge::after {
+  content: "🛠️ Superadmin";
+  display: block;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: #d8b6ff;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Tabs (ya existían pero faltaba el estilo base si no estaba) */
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.tabs button {
+  background: transparent;
+  border: none;
+  padding: 10px 14px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.tabs button.active {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+}
+
+/* File pill: usado en correcciones, registry de trámites, etc. */
+.file-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-top: 8px;
+  background: var(--surface, #fff);
+}
+.file-pill .icon { font-size: 1.4rem; }
+.file-pill .meta { flex: 1; }
+.file-pill .meta strong { display: block; font-size: 0.92rem; }
+.file-pill .meta small { display: block; color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+
+/* Dropzone (transcripción adjuntos en ejercicios y trámites) */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 22px;
+  margin-top: 10px;
+  border: 2px dashed var(--line);
+  border-radius: 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.dropzone:hover, .dropzone.over {
+  border-color: var(--brand);
+  background: rgba(21, 94, 168, 0.04);
+}
+.dropzone strong { font-weight: 700; }
+.dropzone span { font-size: 0.85rem; color: var(--muted); }
+.dropzone-files { width: 100%; margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+
