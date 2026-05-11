@@ -150,16 +150,61 @@ function buildPlan(opositor, scenario = "realista") {
   }
 
   const topics = pickTopicsForOpositor(opositor.id, opositor.organizationId);
+
+  // ── Cálculo de capacidad real hasta el examen ────────────────────────
+  // Si tenemos `examDate`, calculamos cuántas semanas tenemos por delante,
+  // cuántas sesiones de cada tema necesitamos según dificultad/prioridad,
+  // y avisamos si la dedicación actual es insuficiente.
+  let weeksUntilExam = null;
+  let sessionsPerTopic = {};
+  let totalSessionsNeeded = 0;
+  let weeklyCapacity = 0;
+  let feasibilityNote = null;
+
+  const examDate = commitment.examDate ? new Date(commitment.examDate + "T00:00:00") : null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (examDate && examDate > today) {
+    weeksUntilExam = Math.max(1, Math.ceil((examDate - today) / (7 * 86400000)));
+    // Sesiones recomendadas por tema según dificultad × prioridad
+    const difficultyFactor = { Alta: 3, Media: 2, Baja: 1 };
+    const priorityFactor = { "Muy alta": 1.5, Alta: 1.2, Media: 1, Baja: 0.8 };
+    for (const t of topics) {
+      const base = difficultyFactor[t.difficulty] || 2;
+      const mul = priorityFactor[t.priority] || 1;
+      // Mínimo 2 sesiones (1 estudio + 1 repaso) por tema
+      sessionsPerTopic[t.id] = Math.max(2, Math.round(base * mul));
+      totalSessionsNeeded += sessionsPerTopic[t.id];
+    }
+    // Capacidad: bloques totales que el opositor puede hacer hasta el examen
+    weeklyCapacity = eligibleDays.length * blocksPerDay.length;
+    const totalCapacity = weeklyCapacity * weeksUntilExam;
+    // El 60% se dedica a estudio (los otros: 25% repaso, 15% simulacro)
+    const studyCapacity = Math.floor(totalCapacity * 0.6);
+    if (studyCapacity < totalSessionsNeeded) {
+      const deficit = totalSessionsNeeded - studyCapacity;
+      const extraHoursPerWeek = Math.ceil((deficit / weeksUntilExam) * (blocksPerDay[0] || 60) / 60);
+      feasibilityNote = `Cubrir ${topics.length} temas en ${weeksUntilExam} semanas con la dedicación actual deja ${deficit} sesiones de estudio sin cubrir. Considera aumentar +${extraHoursPerWeek} h/semana o ampliar plazo.`;
+    }
+  }
+
+  // ── Construcción del plan semanal ────────────────────────────────────
+  // En lugar de iterar en orden cíclico, distribuimos los temas con
+  // peso proporcional a sus sesiones necesarias. Esto hace que los temas
+  // difíciles/prioritarios aparezcan más veces a lo largo del plan.
   const totalBlocks = eligibleDays.length * blocksPerDay.length;
   const tasks = [];
-  let topicIdx = 0;
 
+  // Construimos una "secuencia ponderada" de topicIds para esta semana:
+  // cada tema aparece tantas veces como su peso normalizado.
+  const weeklyTopicSeq = buildWeightedSequence(topics, sessionsPerTopic, totalBlocks);
+
+  let seqIdx = 0;
   for (const day of eligibleDays) {
     blocksPerDay.forEach((minutes, blockIdx) => {
       const globalIdx = tasks.length;
       const type = distributionForBlock(globalIdx, totalBlocks);
-      const topic = topics[topicIdx % Math.max(1, topics.length)];
-      topicIdx++;
+      const topic = weeklyTopicSeq[seqIdx % Math.max(1, weeklyTopicSeq.length)];
+      seqIdx++;
       tasks.push({
         id: db.id("task"),
         day,
@@ -169,27 +214,66 @@ function buildPlan(opositor, scenario = "realista") {
         done: false,
         notes: "",
         topicId: topic?.id || null,
+        topicTitle: topic?.title || null, // ← título real del tema, accesible para UI
+        topicNumber: topic?.number || null,
+        topicDifficulty: topic?.difficulty || null,
+        topicPriority: topic?.priority || null,
         // Hueco horario sugerido (mañana / tarde / noche según índice)
         suggestedSlot: blockIdx === 0 ? "mañana" : blockIdx === 1 ? "tarde" : "noche",
       });
     });
   }
 
-  // Recomendación según horas
-  const idealHours = 18; // umbral simple
+  // Recomendación según horas + factibilidad
+  const idealHours = 18;
   let recommendation;
   if (weeklyHours < 8) recommendation = "Dedicación baja. Plantea aumentar a 12–15h/semana.";
   else if (weeklyHours < idealHours) recommendation = "Dedicación moderada. Buen ritmo de progreso.";
   else if (weeklyHours <= 30) recommendation = "Dedicación adecuada para el ritmo objetivo.";
   else recommendation = "Dedicación intensiva. Vigila el descanso y evita sobrecarga.";
+  // Si tenemos examDate y no llega, ese mensaje es más relevante
+  if (feasibilityNote) recommendation = feasibilityNote;
 
   return {
     scenario,
     weeklyHours,
     recommendation,
     tasks,
+    weeksUntilExam,
+    totalTopics: topics.length,
+    sessionsPerTopic,
+    totalSessionsNeeded,
+    weeklyCapacity,
+    feasibility: feasibilityNote ? "tight" : (weeksUntilExam ? "ok" : "no_exam_date"),
+    feasibilityNote,
     generatedAt: new Date().toISOString(),
   };
+}
+
+// Construye una secuencia donde cada tema aparece N veces según su peso
+// (sessionsPerTopic[id]). Los temas se intercalan en lugar de agruparse,
+// así el opositor no estudia el mismo tema 3 días seguidos.
+function buildWeightedSequence(topics, sessionsPerTopic, targetLength) {
+  if (!topics.length) return [];
+  // Si no tenemos pesos (sin examDate), peso uniforme = 1
+  const weights = topics.map((t) => sessionsPerTopic[t.id] || 1);
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  // Round-robin con pesos: cada tema mantiene un "crédito" que va consumiendo
+  const credits = weights.map((w) => 0);
+  const seq = [];
+  // Generamos al menos `targetLength` elementos (mínimo igual al nº temas)
+  const len = Math.max(targetLength, topics.length);
+  for (let i = 0; i < len; i++) {
+    // Sumamos peso a cada uno; el de mayor crédito absoluto va primero
+    for (let j = 0; j < topics.length; j++) credits[j] += weights[j] / totalWeight;
+    let bestIdx = 0;
+    for (let j = 1; j < topics.length; j++) {
+      if (credits[j] > credits[bestIdx]) bestIdx = j;
+    }
+    credits[bestIdx] -= 1;
+    seq.push(topics[bestIdx]);
+  }
+  return seq;
 }
 
 // ── API pública ──────────────────────────────────────────────────────────────
@@ -219,6 +303,14 @@ function regeneratePlanFor(opositorId, { scenario = "realista", preserveDone = t
       recommendation: generated.recommendation,
       tasks: generated.tasks,
       generatedAt: generated.generatedAt,
+      // Campos de la planificación con fecha de examen y factibilidad
+      weeksUntilExam: generated.weeksUntilExam,
+      totalTopics: generated.totalTopics,
+      sessionsPerTopic: generated.sessionsPerTopic,
+      totalSessionsNeeded: generated.totalSessionsNeeded,
+      weeklyCapacity: generated.weeklyCapacity,
+      feasibility: generated.feasibility,
+      feasibilityNote: generated.feasibilityNote,
     });
     return { ...existing, ...generated };
   }

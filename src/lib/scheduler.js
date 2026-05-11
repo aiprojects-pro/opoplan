@@ -137,6 +137,10 @@ async function runDailyTasks() {
     if (isLastDayOfMonth(today)) {
       await checkUnconsumedTutoring(opo, today);
     }
+    // 4) Recordatorio por proximidad de examen (FASE 6)
+    await checkExamProximity(opo, today);
+    // 5) Informes periódicos programados (FASE 6)
+    await checkScheduledReports(opo, today);
   }
 }
 
@@ -148,7 +152,8 @@ async function checkInactivity(opo, today) {
   const presetKey = preparador?.inactivitySettings?.preset
     || org?.defaults?.inactivityReminder?.preset
     || "normal";
-  const preset = INACTIVITY_PRESETS[presetKey] || INACTIVITY_PRESETS.normal;
+  // INACTIVITY_PRESETS es array — buscamos por id
+  const preset = INACTIVITY_PRESETS.find((p) => p.id === presetKey) || INACTIVITY_PRESETS.find((p) => p.id === "normal");
   if (!preset || !preset.days) return;
 
   // Obtener última actividad
@@ -171,6 +176,139 @@ async function checkInactivity(opo, today) {
     data: { days: daysSince },
     appUrl,
   }).catch((e) => console.error("[notify:inactivity]", e));
+}
+
+// Recordatorio periódico por proximidad de examen (transcripción ~20:30).
+// La frecuencia depende de la distancia al examen:
+//   <30 días → cada 3 días (high)
+//   <90 días → cada 7 días (medium)
+//   <180 días → cada 14 días (low)
+//   ≥180 días o sin fecha → no se envía
+async function checkExamProximity(opo, today) {
+  const examDate = opo.commitment?.examDate;
+  if (!examDate) return;
+  const days = Math.floor((new Date(examDate + "T00:00:00") - today) / 86400000);
+  if (days < 0 || days > 180) return; // pasado o muy lejano
+  let frequency, intensity;
+  if (days <= 30) { frequency = 3; intensity = "high"; }
+  else if (days <= 90) { frequency = 7; intensity = "medium"; }
+  else { frequency = 14; intensity = "low"; }
+
+  // Disparamos solo si han pasado al menos `frequency` días desde el último
+  const sent = db.collection("remindersSent");
+  const prefix = `examProx|${opo.id}|`;
+  const previous = sent.filter((k) => k.startsWith(prefix));
+  if (previous.length) {
+    const lastDate = previous.map((k) => k.slice(prefix.length)).sort().pop();
+    const daysSinceLast = Math.floor((today - new Date(lastDate + "T00:00:00")) / 86400000);
+    if (daysSinceLast < frequency) return;
+  }
+
+  const key = `${prefix}${today.toISOString().slice(0, 10)}`;
+  markSent(key);
+
+  await notifications.notifyUsers({
+    orgId: opo.organizationId,
+    userIds: [opo.id],
+    template: "examProximity",
+    data: {
+      daysToExam: days,
+      examName: opo.commitment?.examName || "",
+      intensity,
+    },
+    appUrl,
+  }).catch((e) => console.error("[notify:examProximity]", e));
+
+  // Y push al smartphone / smartwatch si está suscrito
+  try {
+    const wp = require("../routes/webpush");
+    if (wp.sendToUser) {
+      await wp.sendToUser({
+        userId: opo.id,
+        payload: {
+          title: `${days}d para tu examen`,
+          body: intensity === "high"
+            ? "Recta final. Mantén el ritmo."
+            : intensity === "medium"
+              ? "Mes final. Hora de simulacros completos."
+              : "Cuenta atrás iniciada.",
+          tag: "exam-proximity",
+          url: "/",
+        },
+      });
+    }
+  } catch (e) { /* webpush no disponible: ok */ }
+}
+
+// Informes periódicos programados (catálogo §A.5, transcripción ~20:15).
+// Cada asignación puede tener `reportSchedule: { enabled, frequency, lastSentAt }`.
+// frequency: weekly | fortnightly | monthly. Si está habilitado, calculamos
+// cuándo tocó el último y mandamos uno nuevo si llegó el momento.
+async function checkScheduledReports(opo, today) {
+  const assignment = db.findOne("assignments", (a) => a.opositorId === opo.id && a.active);
+  if (!assignment) return;
+  const sched = assignment.reportSchedule;
+  if (!sched?.enabled || !sched.frequency) return;
+  const intervalDays = { weekly: 7, fortnightly: 14, monthly: 30 }[sched.frequency];
+  if (!intervalDays) return;
+  const last = sched.lastSentAt ? new Date(sched.lastSentAt) : null;
+  if (last) {
+    const daysSince = Math.floor((today - last) / 86400000);
+    if (daysSince < intervalDays) return;
+  }
+
+  // Generar el contenido del informe (heurística local — sin llamar IA aquí
+  // para no bloquear el cron y no consumir crédito en background).
+  const data = collectOpositorData(opo);
+  const report = renderReportHtml(data, intervalDays);
+  const preparador = db.findOne("users", (u) => u.id === assignment.preparadorId);
+  const frequencyLabel = sched.frequency === "weekly" ? "semanal"
+    : sched.frequency === "fortnightly" ? "quincenal" : "mensual";
+
+  await notifications.notifyUsers({
+    orgId: opo.organizationId,
+    userIds: [opo.id],
+    template: "scheduledReport",
+    data: {
+      windowDays: intervalDays,
+      frequencyLabel,
+      preparadorName: preparador?.name || "",
+      reportHtml: report,
+    },
+    appUrl,
+  }).catch((e) => console.error("[notify:scheduledReport]", e));
+
+  // Marcar como enviado
+  db.update("assignments", (a) => a.id === assignment.id, {
+    reportSchedule: { ...sched, lastSentAt: today.toISOString() },
+  });
+}
+
+function collectOpositorData(opo) {
+  const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const assessments = db.find("assessments", (a) => a.opositorId === opo.id && (a.date || "") >= since);
+  const habits = db.find("habits", (h) => h.opositorId === opo.id && (h.date || "") >= since);
+  const sims = db.find("simulacroAttempts", (a) => a.opositorId === opo.id && (a.startedAt || "") >= since);
+  return { commitment: opo.commitment || {}, assessments, habits, simulacros: sims };
+}
+
+function renderReportHtml(d, windowDays) {
+  const lines = [];
+  if (d.assessments.length) {
+    const avg = d.assessments.reduce((s, a) => s + (a.score || 0), 0) / d.assessments.length;
+    lines.push(`<p><strong>${d.assessments.length} pruebas</strong> en los últimos ${windowDays} días — media <strong>${avg.toFixed(2)}/10</strong>.</p>`);
+  }
+  if (d.simulacros.length) {
+    const avg = d.simulacros.reduce((s, a) => s + (a.score || 0), 0) / d.simulacros.length;
+    lines.push(`<p><strong>${d.simulacros.length} simulacros completados</strong> — media <strong>${avg.toFixed(2)}/10</strong>.</p>`);
+  }
+  if (d.habits.length) {
+    const totalH = d.habits.reduce((s, h) => s + (Number(h.hours) || 0), 0);
+    const compliant = d.habits.filter((h) => h.planCompliance === "full").length;
+    lines.push(`<p><strong>${totalH.toFixed(1)} h</strong> de estudio registradas. Cumplimiento del plan: ${compliant}/${d.habits.length} sesiones.</p>`);
+  }
+  if (!lines.length) lines.push(`<p>Sin actividad registrada en este periodo.</p>`);
+  return lines.join("");
 }
 
 async function checkBrokenCommitment(opo, today) {

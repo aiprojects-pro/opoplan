@@ -76,7 +76,7 @@ module.exports = function adminRoutes({ appUrl } = {}) {
     if (!org) return res.status(404).json({ error: "not_found" });
 
     const patch = {};
-    const sections = ["name", "type", "branding", "contact", "billing", "integrations", "nps", "defaults", "globalPlanOverrides"];
+    const sections = ["name", "type", "branding", "contact", "billing", "integrations", "nps", "defaults", "globalPlanOverrides", "tutorPersona", "certificationLevels"];
     for (const key of sections) {
       if (req.body[key] === undefined) continue;
       if (key === "name" || key === "type") {

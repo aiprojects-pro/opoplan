@@ -35,106 +35,247 @@ module.exports = function seed() {
     // suyos propios además de estos. Cada plan tiene una `line` que clasifica
     // su oferta (oposiciones, universidad, EBAU, preparador independiente).
     subscriptionPlans: [
+      // ─────────────────────────────────────────────────────────────────────
+      // OPOSITOR INDIVIDUAL (B2C) — line: oposiciones, target: opositor
+      // Diseño: free para captación, Pro para autodidacta serio, Plus con
+      // tutorías humanas. Los costes de IA los asume el opositor cuando
+      // conecta su API personal (transcripción ~20:53, catálogo §B.1/§B.2).
+      // ─────────────────────────────────────────────────────────────────────
       {
-        id: "plan_free",
-        scope: "global",
-        organizationId: null,
-        line: "oposiciones",
+        id: "plan_opo_free",
+        scope: "global", organizationId: null,
+        line: "oposiciones", target: "opositor",
         name: "Free",
-        target: "opositor",
-        price: 0,
-        currency: "EUR",
-        period: "monthly",
+        price: 0, currency: "EUR", period: "monthly",
         trialDays: 0,
-        features: ["Plan semanal básico", "Agenda personal", "1 simulacro al mes"],
+        tagline: "Para probar la plataforma",
+        features: [
+          "Plan personalizado básico",
+          "Agenda y compromiso de estudio",
+          "1 simulacro al mes",
+          "Hasta 5 temas en temario propio",
+          "Comunidad y retos abiertos",
+          "IA opcional con tu propia API key (mock por defecto)",
+        ],
+        limits: { simulacrosPerMonth: 1, personalTopics: 5, hasTutoring: false, hasAdaptivePlan: false },
         active: true,
       },
       {
-        id: "plan_premium",
-        scope: "global",
-        organizationId: null,
-        line: "oposiciones",
-        name: "Premium",
-        target: "opositor",
-        price: 29,
-        currency: "EUR",
-        period: "monthly",
+        id: "plan_opo_pro",
+        scope: "global", organizationId: null,
+        line: "oposiciones", target: "opositor",
+        name: "Pro",
+        price: 14.99, currency: "EUR", period: "monthly",
         trialDays: 14,
-        features: ["Plan recalculable", "Materiales completos", "Pruebas ilimitadas"],
+        tagline: "Para opositor autodidacta",
+        features: [
+          "Todo lo de Free",
+          "Plan adaptativo (recálculo según resultados)",
+          "Simulacros y pruebas ilimitadas",
+          "Generación con IA: tests, resúmenes y mapas (con tu API key)",
+          "Asistente IA conversacional 24/7 (con tu API key)",
+          "Trámites con registro de presentación",
+          "Predictor «¿estoy listo?» según notas",
+          "Retos y rankings (opt-in)",
+        ],
+        limits: { simulacrosPerMonth: 999, personalTopics: 999, hasTutoring: false, hasAdaptivePlan: true },
         active: true,
       },
       {
-        id: "plan_premium_tut",
-        scope: "global",
-        organizationId: null,
-        line: "oposiciones",
-        name: "Premium + tutorías",
-        target: "opositor",
-        price: 79,
-        currency: "EUR",
-        period: "monthly",
+        id: "plan_opo_plus",
+        scope: "global", organizationId: null,
+        line: "oposiciones", target: "opositor",
+        name: "Pro + Tutorías",
+        price: 39.99, currency: "EUR", period: "monthly",
         trialDays: 14,
-        features: ["Todo Premium", "Tutorías semanales", "Correcciones personalizadas"],
+        tagline: "Para opositor con seguimiento humano",
+        features: [
+          "Todo lo de Pro",
+          "2 tutorías de 30 min/mes con preparador asignado",
+          "Correcciones personalizadas de ejercicios",
+          "Informes mensuales personalizados",
+          "Acceso a simulacros nacionales certificados (cuando estén)",
+          "Soporte prioritario por email",
+        ],
+        limits: { simulacrosPerMonth: 999, personalTopics: 999, hasTutoring: true, tutoringPerMonth: 2, hasAdaptivePlan: true },
         active: true,
       },
+
+      // ─────────────────────────────────────────────────────────────────────
+      // PREPARADOR INDEPENDIENTE — line: preparador_independiente
+      // Diseño: tres tramos por número de opositores, sin pasar por academia.
+      // El preparador conecta su propia IA opcionalmente (~20:53). Quotas
+      // (maxOpositores/maxProcesses) ya validadas en src/routes/processes.js.
+      // ─────────────────────────────────────────────────────────────────────
       {
         id: "plan_prep_solo",
-        scope: "global",
-        organizationId: null,
-        line: "preparador_independiente",
-        name: "Preparador independiente",
-        target: "preparador",
-        price: 39,
-        currency: "EUR",
-        period: "monthly",
+        scope: "global", organizationId: null,
+        line: "preparador_independiente", target: "preparador",
+        name: "Solo",
+        price: 29, currency: "EUR", period: "monthly",
+        priceYearly: 290,
         trialDays: 30,
-        features: ["Hasta 20 opositores", "Hasta 3 procesos selectivos", "Biblioteca propia", "Marca personal"],
+        tagline: "Empezando como preparador",
+        features: [
+          "Hasta 5 opositores",
+          "1 proceso selectivo",
+          "Marca personal (logo)",
+          "Plan adaptativo, agenda y tutorías",
+          "Chatbot supervisado / off",
+          "IA opcional con tu propia API key",
+          "Soporte por email",
+        ],
+        quota: { maxOpositores: 5, maxProcesses: 1 },
         active: true,
-        // Cuotas del plan (transcripción ~20:22): cuántos procesos puede abrir
-        quota: { maxOpositores: 20, maxProcesses: 3 },
       },
       {
-        id: "plan_prep_team",
-        scope: "global",
-        organizationId: null,
-        line: "preparador_independiente",
-        name: "Preparador equipo",
-        target: "preparador",
-        price: 79,
-        currency: "EUR",
-        period: "monthly",
+        id: "plan_prep_pro",
+        scope: "global", organizationId: null,
+        line: "preparador_independiente", target: "preparador",
+        name: "Pro",
+        price: 79, currency: "EUR", period: "monthly",
+        priceYearly: 790,
         trialDays: 14,
-        features: ["Hasta 50 opositores", "Procesos ilimitados", "Biblioteca propia", "Marca personal"],
+        tagline: "Preparador profesional consolidado",
+        features: [
+          "Hasta 20 opositores",
+          "Hasta 3 procesos selectivos",
+          "Marca personal completa (logo + colores + favicon)",
+          "Carga masiva CSV con email automático",
+          "Adjuntos en instrucciones de ejercicios",
+          "Retos y rankings entre opositores",
+          "Chatbot con 4 modos (off / supervisado / auto general / auto full)",
+          "IA opcional con tu propia API key",
+        ],
+        quota: { maxOpositores: 20, maxProcesses: 3 },
         active: true,
-        quota: { maxOpositores: 50, maxProcesses: 999 },
       },
-      // Línea EBAU / Universidad (transcripción ~19:57)
+      {
+        id: "plan_prep_business",
+        scope: "global", organizationId: null,
+        line: "preparador_independiente", target: "preparador",
+        name: "Business",
+        price: 149, currency: "EUR", period: "monthly",
+        priceYearly: 1490,
+        trialDays: 14,
+        tagline: "Preparador con cartera grande",
+        features: [
+          "Hasta 50 opositores",
+          "Hasta 10 procesos selectivos",
+          "Subdominio personalizado (preparador.tudominio.com)",
+          "Informes mensuales automáticos",
+          "Encuesta NPS a tus alumnos",
+          "Videoconferencia integrada (Zoom/Meet/Teams/Jitsi)",
+          "API para integrar con tu Moodle",
+          "Soporte prioritario (email + Slack)",
+        ],
+        quota: { maxOpositores: 50, maxProcesses: 10 },
+        active: true,
+      },
+
+      // ─────────────────────────────────────────────────────────────────────
+      // ACADEMIA (B2B) — line: academia, target: academia
+      // Diseño: tres tramos por tamaño. La academia tiene varios preparadores
+      // y muchos opositores. Stripe propio, branding propio, integraciones
+      // propias. La IA de la academia es opcional: sus usuarios pueden
+      // conectar la suya (transcripción ~20:53, catálogo §A.1).
+      // ─────────────────────────────────────────────────────────────────────
+      {
+        id: "plan_academy_starter",
+        scope: "global", organizationId: null,
+        line: "academia", target: "academia",
+        name: "Starter",
+        price: 199, currency: "EUR", period: "monthly",
+        priceYearly: 1990,
+        trialDays: 30,
+        tagline: "Academia pequeña, 1-3 preparadores",
+        features: [
+          "Hasta 3 preparadores",
+          "Hasta 100 opositores activos",
+          "Hasta 5 procesos selectivos",
+          "Branding básico (logo + colores)",
+          "Encuesta NPS",
+          "Videoconferencia Jitsi pública",
+          "Email y storage del sistema",
+          "IA opcional (la academia conecta su API key, o cada usuario la suya)",
+        ],
+        quota: { maxPreparadores: 3, maxOpositores: 100, maxProcesses: 5 },
+        active: true,
+      },
+      {
+        id: "plan_academy_growth",
+        scope: "global", organizationId: null,
+        line: "academia", target: "academia",
+        name: "Growth",
+        price: 499, currency: "EUR", period: "monthly",
+        priceYearly: 4990,
+        trialDays: 14,
+        tagline: "Academia consolidada, hasta 500 opositores",
+        features: [
+          "Hasta 10 preparadores",
+          "Hasta 500 opositores activos",
+          "Hasta 20 procesos selectivos",
+          "Branding completo (subdominio, logo, favicon, lema)",
+          "Integración Moodle",
+          "Stripe Checkout (cobras tú a tus opositores)",
+          "Carga masiva CSV con email automático",
+          "Videoconferencia Zoom/Meet/Teams (con tus credenciales)",
+          "Storage propio (S3/R2) y email propio (SMTP/Resend)",
+          "Plantillas NPS extendidas",
+          "IA opcional para toda la academia",
+        ],
+        quota: { maxPreparadores: 10, maxOpositores: 500, maxProcesses: 20 },
+        active: true,
+      },
+      {
+        id: "plan_academy_enterprise",
+        scope: "global", organizationId: null,
+        line: "academia", target: "academia",
+        name: "Enterprise",
+        price: 1299, currency: "EUR", period: "monthly",
+        priceYearly: 12990,
+        trialDays: 0, // contrato comercial, sin trial
+        tagline: "Academia grande / red de academias",
+        features: [
+          "Preparadores y opositores ilimitados",
+          "Procesos selectivos ilimitados",
+          "Marketplace B2B de bancos de preguntas (cuando esté disponible)",
+          "API completa",
+          "White-label / reseller (puedes vender a sub-academias)",
+          "IA premium centralizada (la academia paga, sus opositores no necesitan API key)",
+          "Auditoría inicial de apuntes (única, incluida)",
+          "SLA 99.9%",
+          "Onboarding asistido + soporte 24h",
+        ],
+        quota: { maxPreparadores: 9999, maxOpositores: 9999, maxProcesses: 9999 },
+        active: true,
+      },
+
+      // ─────────────────────────────────────────────────────────────────────
+      // Líneas adicionales (transcripción ~19:57): EBAU y Universidad
+      // Mantenemos un único plan por cada línea por ahora — se pueden
+      // ampliar a 3 paquetes cuando se valide la demanda.
+      // ─────────────────────────────────────────────────────────────────────
       {
         id: "plan_ebau",
-        scope: "global",
-        organizationId: null,
-        line: "ebau",
-        name: "Plan EBAU",
-        target: "opositor",
-        price: 19,
-        currency: "EUR",
-        period: "monthly",
+        scope: "global", organizationId: null,
+        line: "ebau", target: "opositor",
+        name: "EBAU",
+        price: 9.99, currency: "EUR", period: "monthly",
         trialDays: 14,
-        features: ["Asignaturas por comunidad autónoma", "Plan personalizado", "Técnicas de estudio"],
+        tagline: "Para alumnos de Bachillerato",
+        features: ["Asignaturas por comunidad autónoma", "Plan personalizado", "Técnicas de estudio", "IA opcional con tu API key"],
         active: true,
       },
       {
         id: "plan_uni",
-        scope: "global",
-        organizationId: null,
-        line: "universidad",
-        name: "Plan Universitario",
-        target: "opositor",
-        price: 19,
-        currency: "EUR",
-        period: "monthly",
+        scope: "global", organizationId: null,
+        line: "universidad", target: "opositor",
+        name: "Universidad",
+        price: 9.99, currency: "EUR", period: "monthly",
         trialDays: 14,
-        features: ["Plan por asignaturas", "Recursos por carrera", "Técnicas de estudio"],
+        tagline: "Para estudiantes universitarios",
+        features: ["Plan por asignaturas", "Recursos por carrera", "Técnicas de estudio", "IA opcional con tu API key"],
         active: true,
       },
     ],
@@ -147,6 +288,11 @@ module.exports = function seed() {
         slug: "demo",
         status: "active",
         type: "academia", // academia | preparador_independiente
+        // Plan contratado por la academia con OpoPlan (nivel B2B).
+        // El admin de la academia ve esto en su panel de suscripción.
+        subscriptionPlanId: "plan_academy_starter",
+        subscriptionStatus: "active",
+        subscriptionRenewalDate: "2026-06-15",
         createdAt: "2026-01-15",
         // Branding personalizable
         branding: {
@@ -258,7 +404,7 @@ module.exports = function seed() {
         photo: "",
         passwordHash: PW.opo,
         status: "active",
-        subscriptionPlanId: "plan_premium_tut",
+        subscriptionPlanId: "plan_opo_plus",
         chatbotEnabled: true,
         // Compromiso del opositor (Fase 1 + visible para preparador en ~20:38)
         commitment: {
@@ -287,7 +433,7 @@ module.exports = function seed() {
         photo: "",
         passwordHash: PW.opo,
         status: "active",
-        subscriptionPlanId: "plan_premium",
+        subscriptionPlanId: "plan_opo_pro",
         chatbotEnabled: false,
         commitment: {
           examName: "Administrativo C1",
@@ -383,8 +529,8 @@ module.exports = function seed() {
       { id: "c_2", organizationId: ORG_DEMO, preparadorId: "u_prep_1", opositorId: "u_opo_2", type: "llamada", subject: "Riesgo de retraso", notes: "Aumentar disponibilidad o mover fecha objetivo.", date: "2026-04-30", durationMin: 25 },
     ],
     subscriptions: [
-      { id: "sub_1", organizationId: ORG_DEMO, userId: "u_opo_1", planId: "plan_premium_tut", status: "active", amount: 79, renewalDate: "2026-05-30", provider: "stripe", stripeSubscriptionId: "" },
-      { id: "sub_2", organizationId: ORG_DEMO, userId: "u_opo_2", planId: "plan_premium", status: "active", amount: 29, renewalDate: "2026-05-18", provider: "stripe", stripeSubscriptionId: "" },
+      { id: "sub_1", organizationId: ORG_DEMO, userId: "u_opo_1", planId: "plan_opo_plus", status: "active", amount: 39.99, renewalDate: "2026-05-30", provider: "stripe", stripeSubscriptionId: "" },
+      { id: "sub_2", organizationId: ORG_DEMO, userId: "u_opo_2", planId: "plan_opo_pro", status: "active", amount: 14.99, renewalDate: "2026-05-18", provider: "stripe", stripeSubscriptionId: "" },
     ],
     procedures: [
       { id: "tr_1", organizationId: ORG_DEMO, opositorId: "u_opo_1", title: "Inscripción convocatoria", deadline: "2026-05-12", status: "pendiente", notes: "Revisar justificante de tasas.", registry: [] },
@@ -426,5 +572,226 @@ module.exports = function seed() {
     aiArtifacts: [],
     // Actividad de usuarios para detectar inactividad (~20:30)
     activityLog: [],
+
+    // ─── FASE 6: catálogo extendido ─────────────────────────────────────────
+
+    // Banco de preguntas estructurado, alimentado por el preparador. Cada
+    // pregunta queda etiquetada por tema y normativa de referencia, lo que
+    // habilita: (1) dashboard analítico, (2) cruce con monitor normativo,
+    // (3) marketplace de packs.
+    questionBank: [
+      {
+        id: "qb_1", organizationId: ORG_DEMO, processId: "proc_1", topicId: "t_1",
+        text: "Según el artículo 1.1 de la Constitución, España se constituye en un Estado social y democrático de Derecho. ¿Cuáles son sus valores superiores?",
+        options: [
+          "Libertad, justicia, igualdad y pluralismo político",
+          "Libertad, justicia, igualdad y solidaridad",
+          "Libertad, dignidad, igualdad y pluralismo político",
+          "Libertad, justicia, soberanía y pluralismo político",
+        ],
+        correct: 0,
+        difficulty: "media",
+        norm: "CE 1978, art. 1.1",
+        normIssuedAt: "1978-12-29",
+        explanation: "Los valores superiores del ordenamiento jurídico son los cuatro citados literalmente en el art. 1.1.",
+        tags: ["constitucion", "tit_preliminar"],
+        active: true,
+      },
+      {
+        id: "qb_2", organizationId: ORG_DEMO, processId: "proc_1", topicId: "t_1",
+        text: "El Estado se organiza territorialmente en municipios, provincias y…",
+        options: [
+          "Comunidades Autónomas que se constituyan",
+          "Áreas metropolitanas",
+          "Comarcas y mancomunidades",
+          "Diputaciones forales",
+        ],
+        correct: 0,
+        difficulty: "facil",
+        norm: "CE 1978, art. 137",
+        normIssuedAt: "1978-12-29",
+        explanation: "Art. 137 CE: 'El Estado se organiza territorialmente en municipios, en provincias y en las Comunidades Autónomas que se constituyan'.",
+        tags: ["constitucion", "tit_VIII"],
+        active: true,
+      },
+      {
+        id: "qb_3", organizationId: ORG_DEMO, processId: "proc_1", topicId: "t_2",
+        text: "El plazo general para resolver el procedimiento administrativo común es de…",
+        options: [
+          "Tres meses, salvo que una norma con rango de ley fije uno mayor",
+          "Tres meses, sin posibilidad de ampliación",
+          "Seis meses, salvo norma específica",
+          "Un mes, ampliable a tres",
+        ],
+        correct: 0,
+        difficulty: "media",
+        norm: "Ley 39/2015, art. 21.2",
+        normIssuedAt: "2015-10-01",
+        explanation: "Art. 21.2 LPAC: 'el plazo máximo en el que debe notificarse la resolución expresa será el fijado por la norma reguladora del correspondiente procedimiento. Este plazo no podrá exceder de seis meses salvo que una norma con rango de Ley establezca uno mayor o así venga previsto en el Derecho de la Unión Europea'. El supletorio es 3 meses (art. 21.3).",
+        tags: ["lpac", "plazos"],
+        active: true,
+      },
+    ],
+
+    // Intentos de simulacro con métricas cognitivas (catálogo §A.6 / §B.X):
+    // tiempo por pregunta, cambios de respuesta, confianza declarada, orden.
+    // Lo que permite calcular calibración y mapa de vulnerabilidad.
+    simulacroAttempts: [
+      {
+        id: "sa_1", organizationId: ORG_DEMO, opositorId: "u_opo_1", processId: "proc_1",
+        startedAt: "2026-04-27T10:00:00.000Z",
+        finishedAt: "2026-04-27T11:42:00.000Z",
+        durationSec: 6120,
+        score: 7.3,
+        questions: [
+          { qbId: "qb_1", chosen: 0, correct: 0, timeMs: 38000, changes: 0, confidence: "sure" },
+          { qbId: "qb_2", chosen: 0, correct: 0, timeMs: 22000, changes: 0, confidence: "sure" },
+          { qbId: "qb_3", chosen: 2, correct: 0, timeMs: 95000, changes: 2, confidence: "doubt" },
+        ],
+      },
+      {
+        id: "sa_2", organizationId: ORG_DEMO, opositorId: "u_opo_2", processId: "proc_1",
+        startedAt: "2026-04-26T15:00:00.000Z",
+        finishedAt: "2026-04-26T16:35:00.000Z",
+        durationSec: 5700,
+        score: 4.9,
+        questions: [
+          { qbId: "qb_1", chosen: 1, correct: 0, timeMs: 51000, changes: 1, confidence: "doubt" },
+          { qbId: "qb_2", chosen: 2, correct: 0, timeMs: 68000, changes: 0, confidence: "guess" },
+          { qbId: "qb_3", chosen: 0, correct: 0, timeMs: 41000, changes: 0, confidence: "sure" },
+        ],
+      },
+    ],
+
+    // Alertas del monitor normativo (catálogo §A.2). En producción las genera
+    // un servicio externo que vigila BOE/BOJA/DOUE. Aquí van datos de muestra
+    // para que la academia vea el flujo desde el primer arranque.
+    normativeAlerts: [
+      {
+        id: "na_1", organizationId: ORG_DEMO,
+        level: "important",
+        source: "BOE",
+        sourceUrl: "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2026-7XXXX",
+        publishedAt: "2026-04-30",
+        norm: "Ley 39/2015, art. 21",
+        normIssuedAt: "2015-10-01",
+        title: "Modificación del régimen de plazos en el procedimiento administrativo común",
+        summary: "El nuevo redactado clarifica el cómputo del plazo para resoluciones electrónicas y modifica la referencia al Derecho de la Unión Europea.",
+        affectsTopicIds: ["t_2"],
+        affectsQuestionIds: ["qb_3"],
+        diff: "antes: 'Este plazo no podrá exceder de seis meses…'\ndespués: 'Este plazo no podrá exceder de seis meses, computado desde la fecha en que la solicitud haya tenido entrada en el registro electrónico…'",
+        status: "open", // open | dismissed | resolved
+        createdAt: "2026-04-30T08:15:00.000Z",
+      },
+      {
+        id: "na_2", organizationId: ORG_DEMO,
+        level: "informative",
+        source: "BOJA",
+        sourceUrl: "https://www.juntadeandalucia.es/boja/2026/8X/index.html",
+        publishedAt: "2026-04-22",
+        norm: "Decreto 100/2026 de organización de la Junta de Andalucía",
+        normIssuedAt: "2026-04-22",
+        title: "Nueva estructura del Servicio Andaluz de Salud",
+        summary: "Reorganización de las unidades administrativas del SAS. Afecta a temas de organización autonómica del temario de Administrativo.",
+        affectsTopicIds: ["t_2"],
+        affectsQuestionIds: [],
+        diff: "",
+        status: "open",
+        createdAt: "2026-04-22T10:00:00.000Z",
+      },
+    ],
+
+    // Marketplace B2B (catálogo §A.8): packs de bancos de preguntas listados
+    // por academias vendedoras. La compra entre academias requiere Stripe
+    // Connect (out of scope MVP) — aquí lo hacemos como transferencia
+    // simulada que copia las preguntas a la academia compradora.
+    marketplacePacks: [
+      {
+        id: "mkt_1", sellerOrgId: "org_partner_demo",
+        sellerName: "Academia Partner Demo",
+        category: "test_bank",
+        title: "Banco completo Administrativo C1 — Junta Andalucía 2024-2026",
+        description: "1.840 preguntas verificadas tipo ABCD, cubre los 70 temas, actualizado tras la reforma de la LPAC. Tasa de acierto media en simulacros: 64%.",
+        oposicion: "Administrativo C1",
+        scope: "Junta de Andalucía",
+        questionsCount: 1840,
+        topicsCovered: 70,
+        coveragePct: 96,
+        avgAccuracyPct: 64,
+        lastUpdatedAt: "2026-03-15",
+        certified: true,
+        priceLicense: 449, // licencia anual
+        priceOneOff: 1290, // venta única
+        currency: "EUR",
+        ratingAvg: 4.6,
+        ratingCount: 12,
+        // Demo: el pack incluye las 3 preguntas del banco. En producción aquí
+        // van los IDs de las preguntas que el vendedor selecciona para vender.
+        questionIds: ["qb_1", "qb_2", "qb_3"],
+        active: true,
+      },
+      {
+        id: "mkt_2", sellerOrgId: "org_partner_demo",
+        sellerName: "Academia Partner Demo",
+        category: "case_studies",
+        title: "100 supuestos prácticos resueltos — LPAC + LRJSP",
+        description: "Supuestos con rúbrica completa y solución comentada por área temática.",
+        oposicion: "Administrativo / TAG",
+        scope: "AGE / autonómico",
+        questionsCount: 100,
+        topicsCovered: 22,
+        coveragePct: 78,
+        avgAccuracyPct: 0,
+        lastUpdatedAt: "2026-02-01",
+        certified: false,
+        priceLicense: 199,
+        priceOneOff: 549,
+        currency: "EUR",
+        ratingAvg: 4.2,
+        ratingCount: 5,
+        active: true,
+      },
+    ],
+    marketplacePurchases: [],
+
+    // Wellbeing: chequeos de estrés del opositor (catálogo §B.7).
+    stressChecks: [
+      {
+        id: "sc_1", organizationId: ORG_DEMO, opositorId: "u_opo_1",
+        weekOf: "2026-04-22",
+        answers: { overwhelm: 4, sleep: 2, focus: 4, doubt: 3, joy: 2 },
+        score: 18, // alto
+        notes: "Empieza a notar el cansancio acumulado.",
+        createdAt: "2026-04-22T09:00:00.000Z",
+      },
+    ],
+
+    // ─── FASE 6 ampliada ─────────────────────────────────────────────────
+    // Certificación interna (catálogo §A.10.3)
+    certificates: [],
+    // Simulacros interacadémicos (catálogo §A.10.4)
+    alliances: [],
+    crossSimulacros: [],
+    // Seguro de convocatoria (catálogo §A.10.1)
+    insurancePolicies: [],
+    insuranceEnrollments: [],
+    // CRM especializado (catálogo §A.7)
+    leads: [],
+    alumni: [],
+    // Auditoría de apuntes (catálogo §A.9)
+    auditRequests: [],
+    // Comunidad gamificada (catálogo §B.5)
+    studyRooms: [],
+    duels: [],
+    forumThreads: [],
+    mentoringRequests: [],
+    // RAG: corpus indexado de cada academia (catálogo §A.10.5)
+    ragChunks: [],
+    // Vinculaciones del bot de Telegram (catálogo §B.4)
+    telegramLinks: [],
+    // Suscripciones Web Push (sustituto smartwatch — catálogo §B.4)
+    pushSubscriptions: [],
+    // PayPal: facturas emitidas por preparadores particulares
+    paypalInvoices: [],
   };
 };

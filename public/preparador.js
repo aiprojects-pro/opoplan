@@ -415,7 +415,10 @@ const preparadorView = (() => {
           <p class="eyebrow">${ui.esc(s.examName || "Temario")}</p>
           <h1>${ui.esc(s.title)}</h1>
         </div>
-        <button class="btn" id="add-topic-btn">+ Añadir tema</button>
+        <div class="row gap-2">
+          <button class="ghost" id="bulk-import-btn">📥 Importar masivo</button>
+          <button class="btn" id="add-topic-btn">+ Añadir tema</button>
+        </div>
       </div>
       ${s.description ? `<p class="muted mb-4">${ui.esc(s.description)}</p>` : ""}
       <div>
@@ -806,6 +809,7 @@ const preparadorView = (() => {
     // ── Temario ─────────────────────────────────────────────────────────────
     document.getElementById("new-syllabus-btn")?.addEventListener("click", openNewSyllabusModal);
     document.getElementById("add-topic-btn")?.addEventListener("click", () => openTopicModal(null));
+    document.getElementById("bulk-import-btn")?.addEventListener("click", openBulkImportModal);
     document.querySelectorAll("[data-edit-topic]").forEach((b) => {
       b.onclick = () => {
         const t = (state.activeSyllabus?.topics || []).find((x) => x.id === b.dataset.editTopic);
@@ -1017,7 +1021,7 @@ const preparadorView = (() => {
           <div class="grid cols-2">
             <label>Tipo
               <select name="type">
-                ${["evento", "tutoria", "llamada", "videoconferencia", "tarea", "aviso"].map((t) =>
+                ${["evento", "tutoria", "clase", "llamada", "videoconferencia", "tarea", "aviso"].map((t) =>
                   `<option ${(ev.type || "evento") === t ? "selected" : ""}>${t}</option>`).join("")}
               </select>
             </label>
@@ -1181,6 +1185,104 @@ const preparadorView = (() => {
         m.close();
         await loadSyllabus(); render();
       } catch (e) { ui.toast(e.error || "Error", "error"); }
+    };
+  }
+
+  // Modal: subida masiva de temas (catálogo §preparador / §academia)
+  function openBulkImportModal() {
+    if (!state.activeSyllabus) return;
+    const m = ui.modal({
+      title: "Importar temas masivamente",
+      body: `
+        <p class="muted text-sm">Pega el listado de temas en cualquier formato común (numerado, "Tema X:", lista markdown, CSV con cabecera). El sistema los detecta y los previsualiza antes de añadirlos.</p>
+        <details class="mt-2"><summary class="text-sm muted" style="cursor:pointer;">Ver ejemplos de formatos aceptados</summary>
+          <pre style="background:#f5f5f5;padding:8px;border-radius:4px;font-size:11px;overflow:auto;margin-top:6px;">1. La Constitución española
+2. Tit. Preliminar
+3. Derechos fundamentales
+
+────  o también  ────
+
+BLOQUE I — Derecho Constitucional
+Tema 1: La Constitución
+Tema 2.- Tit. Preliminar
+BLOQUE II - Derecho Administrativo
+Tema 3: La LPAC
+
+────  o CSV  ────
+
+number,title,block,difficulty,priority
+1,La Constitución,I,Media,Alta
+2,Derechos,I,Baja,Alta</pre>
+        </details>
+        <form class="form mt-3" id="bulk-form">
+          <label>Texto del temario
+            <textarea name="text" rows="14" required placeholder="Pega aquí el listado…"></textarea>
+          </label>
+          <div class="grid cols-2 gap-2">
+            <label>Formato
+              <select name="format">
+                <option value="">Auto-detectar</option>
+                <option value="text">Texto numerado</option>
+                <option value="csv">CSV</option>
+              </select>
+            </label>
+            <label class="row gap-2 mt-3" style="align-items:center;">
+              <input type="checkbox" name="replace" />
+              <span>Reemplazar temario actual (en vez de añadir)</span>
+            </label>
+          </div>
+        </form>
+        <div id="bulk-preview" style="margin-top:12px;display:none;"></div>`,
+      footer: `<button class="ghost" data-close>Cancelar</button>
+               <button class="ghost" id="bulk-preview-btn">Previsualizar</button>
+               <button class="btn" id="bulk-confirm-btn" disabled>Confirmar</button>`,
+    });
+
+    let parsedOk = false;
+
+    m.el.querySelector("#bulk-preview-btn").onclick = async () => {
+      const fd = new FormData(m.el.querySelector("#bulk-form"));
+      const text = fd.get("text") || "";
+      const format = fd.get("format") || undefined;
+      try {
+        const r = await api.preparador.bulkTopics(state.activeSyllabus.id, {
+          text, format, dryRun: true,
+        });
+        const div = m.el.querySelector("#bulk-preview");
+        div.style.display = "block";
+        div.innerHTML = `
+          <div class="card" style="background:#f5f7fa;">
+            <p><strong>${r.wouldAdd}</strong> temas detectados (formato <code>${ui.esc(r.format)}</code>) · actualmente hay ${r.currentCount}.</p>
+            ${(r.errors || []).length > 0 ? `<p style="color:var(--danger);" class="text-sm">Avisos: ${r.errors.length}</p>` : ""}
+            <p class="muted text-sm">Primeros temas detectados:</p>
+            <ol style="margin:4px 0 0 20px;padding:0;">
+              ${(r.sample || []).map((t) => `<li><strong>${ui.esc(t.number)}</strong> · ${ui.esc(t.title)}${t.block ? ` <small class="muted">[${ui.esc(t.block)}]</small>` : ""}</li>`).join("")}
+            </ol>
+          </div>`;
+        parsedOk = r.wouldAdd > 0;
+        m.el.querySelector("#bulk-confirm-btn").disabled = !parsedOk;
+      } catch (e) {
+        ui.toast(e.error || "Error al previsualizar", "error");
+      }
+    };
+
+    m.el.querySelector("#bulk-confirm-btn").onclick = async () => {
+      if (!parsedOk) return;
+      const fd = new FormData(m.el.querySelector("#bulk-form"));
+      const text = fd.get("text") || "";
+      const format = fd.get("format") || undefined;
+      const replace = fd.get("replace") === "on";
+      try {
+        const r = await api.preparador.bulkTopics(state.activeSyllabus.id, {
+          text, format, replace,
+        });
+        ui.toast(`${r.added} temas añadidos${r.replaced ? " (temario reemplazado)" : ""}`, "success");
+        m.close();
+        await loadSyllabus();
+        render();
+      } catch (e) {
+        ui.toast(e.error || "Error al importar", "error");
+      }
     };
   }
 

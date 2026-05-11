@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../lib/db");
 const auth = require("../middleware/auth");
 const passwords = require("../lib/passwords");
+const { loginLimiter, registerLimiter } = require("../middleware/rateLimits");
 
 module.exports = function authRoutes({ sessionSecret }) {
   const r = express.Router();
@@ -30,8 +31,8 @@ module.exports = function authRoutes({ sessionSecret }) {
     res.json({ orgs });
   });
 
-  // Login
-  r.post("/login", (req, res) => {
+  // Login (con rate limit: 5/15min por IP)
+  r.post("/login", loginLimiter, (req, res) => {
     const { email, password, role, orgSlug } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: "missing_fields" });
 
@@ -134,13 +135,17 @@ module.exports = function authRoutes({ sessionSecret }) {
               videoconference: org.integrations?.videoconference || null,
             },
             globalPlanOverrides: org.globalPlanOverrides || {},
+            // Plan B2B contratado por la academia con OpoPlan
+            subscriptionPlanId: org.subscriptionPlanId || null,
+            subscriptionStatus: org.subscriptionStatus || null,
+            subscriptionRenewalDate: org.subscriptionRenewalDate || null,
           }
         : null,
     });
   });
 
-  // Registro público de opositor (sigue existiendo pero ahora exige slug)
-  r.post("/register-opositor", (req, res) => {
+  // Registro público de opositor (con rate limit: 10/hora por IP)
+  r.post("/register-opositor", registerLimiter, (req, res) => {
     const { name, email, password, phone, orgSlug } = req.body || {};
     if (!name || !email || !password || !orgSlug) return res.status(400).json({ error: "missing_fields" });
     const org = db.findOne("organizations", (o) => o.slug === orgSlug && o.status === "active");

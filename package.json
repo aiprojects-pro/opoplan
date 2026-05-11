@@ -6,21 +6,33 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\"",
+    "test:auth": "node --test tests/auth.test.js",
+    "test:fase6": "node --test tests/fase6.test.js",
+    "gen-vapid": "node scripts/gen-vapid.js",
+    "migrate-sqlite": "node scripts/migrate-to-sqlite.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/s3-request-presigner": "^3.600.0",
     "@google/generative-ai": "^0.21.0",
     "bcryptjs": "^2.4.3",
+    "cookie": "^1.1.1",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
+    "express-rate-limit": "^8.5.1",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.15",
-    "stripe": "^17.0.0"
+    "stripe": "^17.0.0",
+    "web-push": "^3.6.7",
+    "ws": "^8.20.0"
   },
   "engines": {
     "node": ">=18"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.0.0"
   }
 }

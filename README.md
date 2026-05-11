@@ -293,6 +293,165 @@ Funcionalidad completa entregada en las 5 fases. Para producción quedaría:
 - Procesamiento background con BullMQ para emails y webhooks de Stripe
 - App móvil (PWA o nativa) para opositores
 
+## Propuesta de precios (3 paquetes por rol)
+
+Tres paquetes para cada uno de los tres roles. La cadena de IA es opcional en los tres niveles: el opositor o el preparador puede conectar su propia API key (Gemini/OpenAI/Anthropic) y asume el coste de su uso; si no la conecta, hereda la de su academia; si la academia tampoco la tiene activada, se usa la de la plataforma o un mock.
+
+### Opositor individual (B2C)
+
+| Plan | Precio | Para quién | Incluye |
+| --- | ---: | --- | --- |
+| **Free** | 0 € | Probar la plataforma | Plan básico, agenda, 1 simulacro/mes, 5 temas propios, comunidad. IA opcional con tu API key. |
+| **Pro** | 14,99 €/mes | Opositor autodidacta | Plan adaptativo, simulacros ilimitados, generación IA (tests / resúmenes conciso o desarrollado / mapas), asistente IA 24/7, trámites, retos. |
+| **Pro + Tutorías** | 39,99 €/mes | Con seguimiento humano | Todo Pro + 2 tutorías de 30 min/mes con preparador asignado, correcciones personalizadas, informes mensuales. |
+
+Trial de 14 días en Pro y Pro+Tutorías. Líneas adicionales `EBAU` y `Universidad` a 9,99 €/mes.
+
+### Preparador independiente
+
+| Plan | Precio | Cuotas | Notas |
+| --- | ---: | --- | --- |
+| **Solo** | 29 €/mes (o 290 €/año) | 5 opositores · 1 proceso | Marca personal, IA opcional con su API key, soporte por email. |
+| **Pro** | 79 €/mes (o 790 €/año) | 20 opositores · 3 procesos | Branding completo, carga masiva CSV, retos, chatbot con 4 modos. |
+| **Business** | 149 €/mes (o 1.490 €/año) | 50 opositores · 10 procesos | Subdominio propio, informes automáticos, NPS a sus alumnos, videoconferencia integrada, API Moodle. |
+
+Trial 30 días en Solo, 14 días en los demás.
+
+### Academia (B2B)
+
+| Plan | Precio | Cuotas | Notas |
+| --- | ---: | --- | --- |
+| **Starter** | 199 €/mes (o 1.990 €/año) | 3 preparadores · 100 opositores · 5 procesos | Branding básico, NPS, Jitsi, email/storage del sistema. IA opcional. |
+| **Growth** | 499 €/mes (o 4.990 €/año) | 10 preparadores · 500 opositores · 20 procesos | Subdominio + branding completo, Moodle, Stripe Checkout propio, Zoom/Meet/Teams con sus credenciales, S3/R2 propio, SMTP propio. |
+| **Enterprise** | 1.299 €/mes (o 12.990 €/año) | Ilimitado | White-label / reseller, IA premium centralizada, API completa, auditoría inicial de apuntes, SLA 99,9 %, soporte 24h. |
+
+Trial de 30 días en Starter. Enterprise sin trial (contrato comercial).
+
+### Política de IA y costes
+
+- La IA es **opcional en los tres niveles**. Cada uno puede conectar la suya (Gemini, OpenAI o Anthropic) o heredar la del nivel superior.
+- Cuando un opositor conecta su API personal (Pro / Pro+Tutorías), **el coste de cada generación se carga a su cuenta** y no a la academia.
+- En el plan Enterprise de academia, se ofrece IA premium centralizada para sus opositores: la academia paga el consumo, sus alumnos no necesitan API key.
+- En todos los planes B2C/B2B, el cobro funciona con suscripción mensual recurrente (Stripe sandbox por ahora) y se puede cancelar desde el panel del usuario.
+
+### Catálogo extendido (servicios mencionados, propuestos para fases siguientes)
+
+Estos servicios figuran en el catálogo de referencia pero no están implementados todavía. Cuando se prioricen, encajan en los planes así:
+
+- **Generador IA con dificultad calibrada y modo anti-reciclado** (catálogo §A.1 ampliado): se acopla al `Generador de tests` actual sin tocar precios; sale en plan Pro/Business del preparador y Growth/Enterprise de academia.
+- **Monitor normativo automatizado** (§A.2): add-on independiente, 99–499 €/mes adicionales según el número de oposiciones monitorizadas.
+- **Dashboard analítico pedagógico** (§A.3 — mapa de calor, distractor dominante, ROI por tema): incluido en Growth y Enterprise; add-on separado para Starter.
+- **Detección temprana de abandono con scoring 0-100** (§A.4): incluido en Growth y Enterprise.
+### Catálogo extendido — Fase 6 (implementado)
+
+Los 7 servicios siguientes están implementados sobre la plataforma. Cada uno indica qué parte funciona con datos reales del sistema y qué parte es scaffold listo para enchufar a un servicio externo.
+
+#### 1. Dashboard analítico pedagógico (catálogo §A.3)
+
+**Real:** mapa de calor del temario por tasa de acierto, ranking de preguntas más falladas con distractor dominante, comparativa entre preparadores de la misma academia, rendimiento individual con tendencia (regresión lineal sobre últimos 5 simulacros) y calibración (¿declara confianza acertada?). Endpoints: `GET /api/analytics/heatmap`, `/most-failed`, `/group-comparison`, `/opositor/:id/performance`. UI: pestaña "Analítica pedagógica" del admin.
+
+#### 2. Detección temprana de abandono (catálogo §A.4)
+
+**Real:** scoring 0-100 por opositor combinando inactividad (`activityLog`), tendencia descendente en últimos 3 simulacros, racha de días sin cumplir compromiso y nivel de estrés reciente. Niveles `low / low_medium / medium / high` con acción sugerida automática (email automático, alerta a tutor con guion, llamada). Endpoint: `GET /api/analytics/abandon-risk`. UI: en la misma pestaña de Analítica.
+
+#### 3. Predictor de fecha óptima (catálogo §B.3)
+
+**Real:** regresión lineal sobre los últimos 8 simulacros, proyección al umbral configurable (5,0 por defecto), distribución normal acumulada para calcular probabilidad de aprobar hoy y en la fecha de examen. Brecha por tema con ROI = brecha × peso. Endpoints: `GET /api/predictor/forecast`, `/predictor/gap`. UI: sección "Predictor" del opositor.
+
+**Limitaciones declaradas:** modelo intencionadamente sencillo. La probabilidad asume distribución normal de la nota; con muestras pequeñas (<5 simulacros) el resultado es orientativo. La ponderación por tema asume peso uniforme — en producción se carga del proceso o de exámenes históricos reales.
+
+#### 4. Monitor normativo (catálogo §A.2)
+
+**Scaffold + datos de muestra:** modelo `normativeAlerts` con niveles `critical / important / informative`, cruce contra `topicIds` y `questionIds`, diff visible y acciones (descartar / resolver). El servicio `normativeMonitor.js` expone `fromEnv()` con dos providers: `mock` (devuelve sin operación, usado por defecto) y `boe` (estructura lista para conectar al feed JSON oficial del BOE — `https://www.boe.es/datosabiertos/api/...`). En modo demo, el superadmin puede generar alertas sintéticas con `POST /api/normative/synthetic`.
+
+**Para activar el feed real**: implementar el `runOnce()` del provider BOE iterando sobre el feed de identificadores y comparando con `questionBank.norm`. Cada CCAA requiere su propio adaptador (BOJA, DOGC, BOPV…).
+
+#### 5. Marketplace B2B de bancos de preguntas (catálogo §A.8)
+
+**Real:** modelo `marketplacePacks` y `marketplacePurchases`, filtros por categoría/oposición/certificación/búsqueda, listado de packs propios con estadísticas de ventas, comisión 18 % calculada sobre cada venta. La compra copia las preguntas del pack al `questionBank` de la academia compradora. Endpoints: `GET /api/marketplace/packs`, `/my-listings`, `/my-purchases`; `POST /api/marketplace/listings`, `/buy/:id`. UI: pestaña "Marketplace" del admin.
+
+**No implementado:** flujo de pago entre dos academias. Requiere Stripe Connect (cuentas conectadas, transferencias platform-fee con `application_fee_amount`). Las compras quedan en estado `paymentStatus: "pending_transfer"` hasta que se enchufe la pasarela.
+
+#### 6. Bienestar y gestión del estrés (catálogo §B.7)
+
+**Real:** cuestionario semanal de estrés (5 ítems calibrados sobre DASS-21 abreviado, escala 1-5), histograma de evolución, biblioteca de 5 micro-recursos (respiración 4-7-8, Pomodoro adaptado, rutina pre-examen, protocolo de bloqueo en pregunta, visualización), indicador de sostenibilidad calculado de horas/día + último estrés con consejo automático. Endpoints: `GET/POST /api/wellbeing/stress-check`, `/stress-history`, `/resources`, `/sustainability`. UI: sección "Bienestar" del opositor.
+
+**No implementado:** audio TTS de los recursos (los `audioUrl` están vacíos), red de apoyo entre opositores, sesiones en directo con psicólogos.
+
+#### 7. Simulacros con análisis cognitivo (catálogo §A.6, §B simulacros)
+
+**Real:** flujo completo `begin → answer → finish` con métricas por pregunta: tiempo invertido en ms, nº de cambios de respuesta, nivel de confianza declarado (`sure / doubt / guess`), orden de resolución. Análisis post-simulacro con calibración (¿confía cuando acierta?), preguntas más lentas, mapa de vulnerabilidad (acierta pero con baja confianza o muchos cambios — riesgo bajo presión). Endpoints: `POST /api/simulacros/begin`, `/:id/answer`, `/:id/finish`; `GET /api/simulacros/mine`, `/:id/analysis`. UI: sección "Simulacro avanzado" del opositor con timer por pregunta y selector de confianza.
+
+#### 8. Contenido multi-canal (catálogo §B.4)
+
+**Real:** "Pregunta del día" estable por día (mismo seed para todos los opositores), generación server-side de PDF de repaso por tema (Markdown + HTML imprimible que el navegador exporta a PDF con su función nativa), tarjetas SVG 1080×1080 para compartir en redes con la marca de la academia. Endpoints: `GET /api/multichannel/daily-question`, `/study-recap?topicId=...`, `/share-card?qbId=...`.
+
+**No implementado:** bot de Telegram (requiere `BOT_TOKEN` y webhook), Instagram Graph API, audio TTS, smartwatch (apps nativas).
+
+### Catálogo extendido — Fase 6 ampliada (implementado)
+
+Resto de servicios del catálogo. **B2B2C (A.10.2 Plan opositor empleado)** queda fuera por decisión de producto.
+
+#### 9. Pendientes de la transcripción
+
+- **Trámite "Día del examen"** (transcripción ~20:32): añadido al catálogo `PROCEDURE_CATALOG` con checklist de DNI, convocatoria, bolígrafos, agua, ruta. También se añadió `reclamacion` para recurso contra calificación.
+- **Recordatorio periódico por proximidad de examen** (transcripción ~20:30): nuevo job `checkExamProximity` en `scheduler.js` que dispara emails con frecuencia adaptativa según la distancia al examen — cada 3 días si quedan <30, cada 7 si <90, cada 14 si <180. Plantilla `examProximity` en notifications con tres tonos (high/medium/low) según urgencia.
+- **Informes automáticos programados** (transcripción ~20:15): cada `assignment` ahora tiene `reportSchedule: { enabled, frequency, lastSentAt }` con frecuencias `weekly | fortnightly | monthly`. El job `checkScheduledReports` recorre las asignaciones y envía un informe con datos reales (asistencias, simulacros, hábitos del periodo). Endpoint: `PATCH /api/preparador/assignments/:id/report-schedule`. **Real**, datos calculados; el contenido se genera por heurística local para no bloquear el cron con llamadas a IA.
+
+También arreglado un bug en el job de inactividad: `INACTIVITY_PRESETS` se trataba como objeto cuando es array — ahora se busca por `id`.
+
+#### 10. A.10.3 Certificación interna de nivel
+
+**Real:** modelo `certificates` con verificación pública por código alfanumérico (formato `XXXX-XXXX`). Niveles configurables por academia (defaults: L1 con 3 simulacros ≥5,0; L2 con 6 ≥6,0; L3 con 10 ≥7,0; L4 con 15 ≥7,5). El opositor reclama el certificado cuando cumple criterio; se emite SVG 1240×877 con la marca de la academia y queda verificable. Endpoints: `GET /api/certifications/levels` (config), `/mine` (elegibilidad del opositor), `POST /api/certifications/issue/:levelId`, `GET /api/certifications/:id?code=XXX` (verificación pública), `/:id/render` (SVG). UI: pestaña "🎖️ Mis certificaciones" del opositor + sub-pestaña "Certificaciones" en Avanzado del admin.
+
+#### 11. A.10.5 White-label de IA tutora
+
+**Real:** la academia configura `tutorPersona` con `name`, `avatar` (emoji), `role` (especialidad), `tone`, `greeting` y `systemAddon` (instrucciones extra). El system prompt del chat usa esa persona; el endpoint `/api/chat/status` devuelve nombre, avatar y saludo para que el opositor vea "Carlos el tutor de Andalucía 👨‍🏫" en lugar de un genérico. UI: sub-pestaña "Tutor IA" en Avanzado del admin.
+
+**Limitación:** el RAG sobre el corpus específico de la academia (que el catálogo describe en §A.10.5) requiere un servicio de indexación de los materiales propios. El modelo está preparado para enchufarlo (cuando se cargue, el `systemAddon` se enriquece con extractos relevantes), pero el indexador no está implementado.
+
+#### 12. A.10.4 Simulacros interacadémicos
+
+**Real:** modelo `alliances` con miembros, owner y pendientes; `crossSimulacros` que una academia publica al pool de la alianza. El admin puede crear alianza, invitar a otra academia por slug, aceptar invitaciones, salir, publicar simulacros propios. El opositor de cualquier academia miembro ve los simulacros del resto de academias en la alianza. Endpoints: `GET /api/alliances/mine`, `/invites`, `/simulacros`; `POST /api/alliances`, `/:id/invite`, `/:id/accept`, `/:id/leave`, `/:id/publish-simulacro`. UI: sub-pestaña "Alianzas" en Avanzado del admin.
+
+**Limitación honesta:** el catálogo (§A.10.4) menciona "la plataforma gestiona la facturación entre academias" — eso requeriría Stripe Connect (cuentas conectadas, `application_fee_amount`). En MVP los simulacros entre aliados son sin coste; cuando se integre la pasarela, basta con añadir cobro y reparto sobre cada simulacro consumido.
+
+#### 13. A.10.1 Seguro de convocatoria
+
+**Real:** modelo `insurancePolicies` (que la academia define) y `insuranceEnrollments` (suscripción del opositor). Cada póliza tiene prima en %, condiciones (% del programa, % de simulacros, convocatorias presentadas) y beneficio (extensión gratuita o devolución parcial). El sistema calcula automáticamente la elegibilidad del opositor con `computeCompliance()` y permite reclamar el beneficio cuando se cumplen condiciones y no se ha aprobado. Las reclamaciones tienen ciclo `pending_review → approved | rejected` revisadas por admin. Endpoints: `GET /api/insurance/policies`, `/mine`; `POST /api/insurance/policies`, `/enroll`, `/enrollments/:id/register-attempt`, `/enrollments/:id/claim`. UI: sub-pestaña "Seguros" en Avanzado del admin.
+
+**No implementado:**
+- **Cálculo actuarial real**: el catálogo asume que "los alumnos que aprueban rápido subvencionan a los que tardan". Sin datos reales de aprobados/no aprobados a escala, no se puede calibrar. La plataforma deja la prima fijada por la academia.
+- **Cobro de la prima**: las suscripciones quedan en `premiumStatus: "pending"` hasta que se conecte Stripe.
+- **Alianza con aseguradora externa**: out of scope MVP.
+
+#### 14. A.7 CRM especializado
+
+**Real:** modelo `leads` con pipeline de 6 etapas (`lead → contacted → demo → negotiating → matriculated | lost`), tags libres para segmentación, histórico de eventos (creación, cambios de etapa, comentarios, conversión), búsqueda por texto/etapa/tag. Modelo `alumni` con testimonio, año, puesto, estado (`approved / in_position / ambassador`) y flag `offersMentoring`. Endpoint público `/api/crm/mentors` que el opositor consume desde la sección Comunidad. Endpoints: `GET /api/crm/leads`, `/alumni`, `/mentors`; `POST /api/crm/leads`, `/leads/:id/convert`, `/alumni`. UI: pestaña "📇 CRM y alumni" del admin con tres sub-pestañas.
+
+**No implementado:** nurturing por email automático segmentado por etapa (las plantillas existen, falta el motor de campañas), integración con Mailchimp/HubSpot (out of scope MVP).
+
+#### 15. A.9 Auditoría de apuntes
+
+**Real (workflow):** modelo `auditRequests` con estados `requested → in_review → report_ready → delivered | cancelled`, comentarios bidireccionales (admin de academia ↔ superadmin de plataforma), ciclo de vida con histórico de eventos. El superadmin sube el informe final con discrepancias y preguntas afectadas. Endpoints: `GET /api/audits/mine`, `/all` (superadmin), `/statuses`; `POST /api/audits`, `/:id/comment`; `PATCH /api/audits/:id`. UI: sub-pestaña "Auditorías" en Avanzado del admin.
+
+**Honestidad:** el análisis automático de discrepancias normativas es trabajo humano (posiblemente apoyado por una herramienta de IA con RAG sobre el corpus normativo). Este módulo solo gestiona el ciclo del servicio, no lo automatiza.
+
+#### 16. B.5 Comunidad gamificada extendida
+
+**Real:**
+- **Rachas globales**: días consecutivos con actividad de estudio (sumando `habits` y tareas del plan completadas). Endpoint `/api/community/streak`. Tabla de clasificación opt-in con `profile.publicLeaderboard`.
+- **Salas Pomodoro compartidas**: hasta 8 opositores con temporizador sincronizado (modos 25/5 y 50/10). El servidor avanza fases automáticamente cuando se consulta el estado, los clientes hacen polling cada 10 segundos. Endpoints: `GET/POST /api/community/study-rooms`, `/:id/state`, `/:id/join`, `/:id/leave`.
+- **Modo duelo**: dos opositores se retan a 10 preguntas; gana el de más aciertos (desempate por tiempo). Endpoints: `/api/community/duels`, `/duels/:id/accept`, `/duels/:id/submit`. UI con flujo simple de `prompt()` para responder — versión cómoda con UI dedicada queda como mejora.
+- **Foros**: hilos por etiqueta opcional, respuestas, autor con rol. Endpoints: `/api/community/forum/threads`.
+- **Mentoring**: el opositor solicita sesión a un alumnus con `offersMentoring=true` desde la sub-pestaña Mentores. Endpoint: `POST /api/community/mentoring/request`.
+
+UI: pestaña "👥 Comunidad" del opositor con cinco sub-pestañas (Mi racha, Salas Pomodoro, Duelos, Foro, Mentores).
+
+**Limitación honesta:** las salas Pomodoro y duelos en tiempo real usan polling simple sobre HTTP, sin WebSockets. Funciona perfectamente para pequeños grupos pero no escala a cientos de salas concurrentes. Cuando crezca la base de usuarios, migrar a WebSocket o Server-Sent Events.
+
+
+
 ## Notas técnicas
 
 - **Sesiones**: cookie firmada con HMAC. Para producción se puede migrar a JWT o `express-session` + Redis.
@@ -300,6 +459,147 @@ Funcionalidad completa entregada en las 5 fases. Para producción quedaría:
 - **Contraseñas**: bcrypt (`bcryptjs`, 10 rounds por defecto, configurable con `BCRYPT_ROUNDS`). El sistema mantiene compatibilidad con el formato antiguo SHA-256: cuando un usuario con hash heredado hace login con su contraseña correcta, el servidor lo re-hashea con bcrypt y lo persiste en la misma petición — migración transparente sin intervención del usuario.
 - **Webhooks Stripe**: el endpoint `/api/billing/webhook` recibe el body crudo (necesario para verificar la firma) — no mover de su posición en `server.js`.
 - **Branding por academia**: el admin guarda los colores y el frontend inyecta variables CSS (`--brand`, `--brand-dark`, `--accent`) que se aplican a toda la UI sin recargar.
+
+## Infraestructura adicional (bloques de Fase 6 ampliada)
+
+### Tests automatizados
+
+Suite formal con `node --test`. Ejecutar `npm test` corre todo en serie (concurrencia 1 para evitar conflictos en la DB JSON compartida). Cubre auth, los 7 servicios de Fase 6, los 9 servicios de Fase 6 ampliada, Stripe Connect, RAG y Telegram (mock). 34 tests verdes al cierre. Helpers en `tests/helpers.js` arrancan el servidor en puerto aleatorio importando `server.js` exportado, hacen login con cookies persistentes y exponen `asAdmin/asLucia/asAlvaro/asPreparador/asSuperadmin`.
+
+### Stripe Connect (catálogo §A.8 + §A.10.1)
+
+Servicio dual `mock | stripe` en `src/services/paymentsConnect.js`. El mock auto-confirma PaymentIntents al crearlos para que la demo funcione end-to-end sin claves; el provider real usa la librería oficial `stripe` (cargada lazy). Activar con `STRIPE_CONNECT=stripe`, `STRIPE_SECRET_KEY=sk_…`, `STRIPE_WEBHOOK_SECRET=whsec_…`. Marketplace ya integra el provider: si la academia vendedora está onboardeada (status `active`) crea un PaymentIntent con `application_fee_amount` (18 % comisión); si no, la compra queda en `pending_transfer` para resolución manual.
+
+### WebSocket realtime (catálogo §B.5)
+
+`src/services/realtime.js` monta WS en path `/ws` sobre el mismo servidor HTTP. Autenticación por cookie de sesión. Canales seguros (`room:<id>`, `duel:<id>`, `org:<orgId>`) con `canSubscribe()` que verifica pertenencia. Eventos emitidos desde `community.js`: `member_joined`, `member_left`, `phase_changed`, `accepted`, `answer_submitted`, `finished`. Cliente en `public/realtime.js` con reconexión automática cada 5 s y fallback transparente a polling si la conexión falla — la app sigue funcionando sin WS.
+
+### RAG sobre corpus propio (catálogo §A.10.5)
+
+`src/lib/rag.js` con embedders `openai` (text-embedding-3-small), `gemini` (text-embedding-004) y `mock` (hash bag-of-words 64D L2-normalizado). Cadena de selección: usuario → academia → env → mock. Chunking por palabras (~200 con overlap 30). Vector store en `ragChunks` (memoria + persistido en JSON). `reindexOrg()` borra todos los chunks anteriores y regenera desde syllabi + questionBank + materials. `retrieve()` calcula cosine similarity contra el embedding de la query y devuelve top-K hits. El chat inyecta automáticamente los hits con score ≥ 0.4 en el system prompt antes del contexto del estudiante. Endpoints: `GET /api/rag/status`, `POST /api/rag/reindex`, `POST /api/rag/search`. Limitación: el vector store en memoria no escala más allá de ~10K chunks; cuando crezca, migrar a SQLite con la extensión `sqlite-vec` o a un vector store dedicado.
+
+### Feed BOE real (catálogo §A.2)
+
+Reescrito `src/services/normativeMonitor.js` con dos providers: `mock` (devuelve sin operación) y `boe` real que hace fetch al sumario diario del BOE Datos Abiertos (`https://boe.es/datosabiertos/api/boe/sumario/{YYYYMMDD}`) — endpoint público sin auth. Para cada disposición busca coincidencias contra `questionBank.norm` con heurística (título contiene la norma o tokens), genera alertas idempotentes con `externalId` (no se duplican). `levelFor()` asigna `important` a Sección I y `informative` al resto. Activación: `NORMATIVE_PROVIDER=boe`. El superadmin dispara `runOnce` con `POST /api/normative/run-once` (body: `{organizationId}`). Limitación: solo BOE; CCAA quedan como providers separados a añadir cuando se priorice.
+
+### Telegram bot (catálogo §B.4)
+
+`src/services/telegramBot.js` con doble factory `mock | real`. El real usa `fetch` directo a `https://api.telegram.org/bot{TOKEN}/{method}` (sin dependencia adicional). Comandos: `/start` genera código de 8 dígitos para vincular (caduca 10 min); `/preguntadia` envía pregunta del banco con seed por fecha y la respuesta como spoiler de MarkdownV2; `/miprogreso` muestra racha + media de simulacros; `/examen` cuenta días al examen con tip motivacional adaptativo; `/help`. El opositor introduce el código en `POST /api/telegram/confirm`. Activar con `TELEGRAM_BOT_TOKEN=…` y `TELEGRAM_WEBHOOK_SECRET=…` en `.env`; tras desplegar, `POST /api/telegram/setup-webhook` (solo superadmin) con la URL pública. Sin `BOT_TOKEN` el módulo se carga pero responde con `enabled: false` — los endpoints siguen montados sin fallar el arranque.
+
+### TTS cliente con Web Speech API (catálogo §B.4)
+
+`public/audio.js` con módulo `window.__audio` que envuelve `speechSynthesis` del navegador. Sin coste ni claves: funciona en Chrome, Edge, Safari y derivados. API mínima: `speak(text, opts)`, `pause()`, `resume()`, `stop()`, `isSpeaking()`, `list()`. Selección de voz preferida `es-ES` con fallback a cualquier `es-*` y luego default. Integrado en la biblioteca de bienestar: cada recurso muestra un botón "🔊 Escuchar" si el navegador soporta TTS. La pregunta del día puede leerse igual con un botón análogo (mismo patrón). Linux puede no traer voces es-ES por defecto — en ese caso la lista queda vacía y el botón se oculta.
+
+### PWA + Web Push (sustituto honesto del smartwatch nativo)
+
+Tres piezas:
+1. **`public/manifest.webmanifest`** + `<link rel="manifest">` y `theme-color` en `index.html`. Cuando el usuario "Añade a pantalla de inicio" en su móvil, OpoPlan se instala como PWA en standalone.
+2. **`public/sw.js`** registra cache estático de la app shell (cache-first para assets, network-only para `/api/`) y maneja eventos `push` y `notificationclick`.
+3. **`src/routes/webpush.js`** + librería `web-push`. Genera VAPID keys al arrancar (configurables vía `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` para persistir entre reinicios). Endpoints: `GET /api/webpush/public-key`, `POST /api/webpush/subscribe`, `/unsubscribe`, `/test`. Cliente en `public/push.js` (`window.__push`) registra el SW, pide permiso y envía la suscripción al servidor.
+
+El scheduler de proximidad de examen ya envía push además del email cuando hay suscripción activa. Honestidad: **no es Apple Watch nativo ni Wear OS app**, pero en la práctica una PWA instalada en móvil con permiso de notificaciones hace llegar los avisos al smartwatch del usuario a través del puente del smartphone.
+
+### Instagram (catálogo §B.4) — no implementado
+
+Decisión consciente: la integración con Instagram requiere registrar una app en Meta Developer Console, pasar **App Review** (proceso de aprobación que tarda semanas), tener una cuenta de Instagram Business verificada vinculada a una página de Facebook, y obtener un long-lived access token para cada cliente. Es un trabajo de integración + burocracia que bloquea durante semanas.
+
+Lo que sí está preparado para cuando se priorice:
+- El generador de SVG de "tarjeta para compartir" (`/api/multichannel/share-card?qbId=…`) ya produce el asset visual con la marca de la academia. Solo hay que convertirlo a JPEG (con `sharp`) y publicarlo vía Graph API.
+- La estructura `src/services/instagramPublisher.js` se añadirá con doble provider `mock | meta` siguiendo el mismo patrón que Telegram y Stripe Connect.
+- En `multichannel.js` ya hay un endpoint `POST /api/multichannel/publish-instagram?qbId=…` reservado mentalmente para enchufarlo en su día.
+
+Mientras tanto, la academia puede descargar el SVG, convertirlo localmente y publicarlo manualmente desde Instagram Creator Studio o la app móvil — exactamente igual que cualquier otro contenido visual.
+
+## Despliegue en producción
+
+OpoPlan funciona en desarrollo con valores por defecto (mock providers, JSON en disco). Para producción hay cuatro cosas que **debes** configurar antes de servir tráfico real:
+
+### 1. Variables de entorno obligatorias
+
+```bash
+NODE_ENV=production
+SESSION_SECRET=<48 bytes hex aleatorios>
+VAPID_PUBLIC_KEY=<generar con npm run gen-vapid>
+VAPID_PRIVATE_KEY=<generar con npm run gen-vapid>
+```
+
+Genera un `SESSION_SECRET` fuerte con:
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+Genera las claves VAPID con:
+```bash
+npm run gen-vapid
+# Copia las dos líneas resultantes a tu .env
+```
+
+OpoPlan **rehúsa arrancar** en producción si: (a) `SESSION_SECRET` es el de dev o tiene menos de 32 caracteres, (b) faltan las claves VAPID. Esto es deliberado: arrancar con esos valores comprometidos es peor que no arrancar.
+
+### 2. Base de datos: migrar a SQLite
+
+El JSON único es cómodo en desarrollo pero NO escala. Para producción:
+
+```bash
+# 1. Instalar la dependencia opcional
+npm install better-sqlite3
+
+# 2. Migrar el JSON existente a SQLite (idempotente, no destructivo)
+npm run migrate-sqlite
+
+# 3. Arrancar con el nuevo backend
+OPOPLAN_DB=sqlite npm start
+```
+
+El JSON original queda intacto como backup. Si algo va mal, basta con quitar `OPOPLAN_DB=sqlite` para volver a JSON.
+
+SQLite con WAL y `synchronous=NORMAL` soporta cómodamente decenas de miles de filas y centenares de usuarios concurrentes. Si crece más allá de eso, el siguiente paso natural es PostgreSQL — el contrato de `src/lib/db.js` se mantendría, solo cambiaría la implementación.
+
+### 3. HTTPS + reverse proxy
+
+OpoPlan no termina TLS por sí mismo: ponlo detrás de Caddy, nginx o un balanceador. Cuando `NODE_ENV=production`:
+
+- Las cookies de sesión se marcan `Secure` (solo viajan por HTTPS)
+- `app.set("trust proxy", 1)` se activa para que `req.ip` y `req.protocol` reflejen al cliente real
+- El rate limiter por IP funciona correctamente
+
+Ejemplo mínimo de `Caddyfile`:
+```
+opoplan.tu-dominio.com {
+    reverse_proxy localhost:3000
+}
+```
+
+Caddy gestiona Let's Encrypt automáticamente. Si usas nginx, asegúrate de enviar los headers `X-Forwarded-For`, `X-Forwarded-Proto` y `Host`.
+
+### 4. Rate limiting
+
+Activo por defecto en producción (deshabilitado en tests):
+
+| Endpoint | Límite |
+| --- | --- |
+| `POST /api/auth/login` | 5 intentos / 15 min / IP |
+| `POST /api/auth/register-opositor` | 10 / hora / IP |
+| `/api/*` (general) | 200 / minuto / IP |
+| Webhooks externos | 60 / minuto / IP |
+
+Los límites se definen en `src/middleware/rateLimits.js`. Subirlos o bajarlos es trivial. Requiere `trust proxy` configurado (paso 3) — si no, la IP que ve el limiter es la del proxy y bloqueas a todo el mundo o a nadie.
+
+### Checklist de pre-producción
+
+```
+[ ] NODE_ENV=production
+[ ] SESSION_SECRET (≥32 chars, aleatorio)
+[ ] VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY (npm run gen-vapid)
+[ ] BCRYPT_ROUNDS=12 (más fuerte que el default de 10)
+[ ] OPOPLAN_DB=sqlite + npm run migrate-sqlite ejecutado
+[ ] Reverse proxy HTTPS (Caddy/nginx) configurado
+[ ] data/ con backup automático (la DB vive aquí)
+[ ] uploads/ con backup automático (los archivos viven aquí)
+[ ] Logs redirigidos (PM2, systemd, journalctl)
+[ ] Email provider real (SMTP/Resend) si quieres avisos por email
+[ ] Variables de proveedores externos si los usas: Stripe, Telegram, BOE, AI
+```
 
 ## Licencia
 

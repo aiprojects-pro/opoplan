@@ -31,11 +31,30 @@ function verify(token, secret) {
 
 function setSession(res, secret, userId) {
   const token = sign({ userId, exp: Date.now() + TTL_MS }, secret);
-  res.cookie(COOKIE, token, { httpOnly: true, sameSite: "lax", maxAge: TTL_MS });
+  // En producción (NODE_ENV=production) marcamos la cookie como Secure
+  // — solo viaja por HTTPS. Detrás de un proxy inverso (nginx/Caddy) hace
+  // falta también `app.set("trust proxy", 1)` en server.js para que express
+  // detecte correctamente el protocolo original.
+  const isProd = process.env.NODE_ENV === "production";
+  res.cookie(COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: TTL_MS,
+    secure: isProd,
+    path: "/",
+  });
 }
 
 function clearSession(res) {
-  res.clearCookie(COOKIE);
+  // Importante: las opciones path + secure deben coincidir con setSession
+  // o el navegador no la borrará realmente.
+  const isProd = process.env.NODE_ENV === "production";
+  res.clearCookie(COOKIE, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProd,
+    path: "/",
+  });
 }
 
 // Middleware: lee la cookie, carga el usuario y su organización.

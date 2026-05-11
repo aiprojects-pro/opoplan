@@ -1,0 +1,19 @@
+{
+  "name": "OpoPlan",
+  "short_name": "OpoPlan",
+  "description": "Plataforma de preparación de oposiciones",
+  "lang": "es-ES",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08264a",
+  "theme_color": "#155ea8",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

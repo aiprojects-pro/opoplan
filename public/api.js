@@ -105,6 +105,14 @@ const api = (() => {
       syllabi: () => request("GET", "/api/preparador/syllabi"),
       createSyllabus: (data) => request("POST", "/api/preparador/syllabi", data),
       addTopic: (id, data) => request("POST", `/api/preparador/syllabi/${id}/topics`, data),
+      bulkTopics: (id, data) => request("POST", `/api/preparador/syllabi/${id}/topics/bulk`, data),
+      // PayPal del preparador particular
+      paypalConfig: () => request("GET", "/api/preparador/me/paypal"),
+      savePaypalConfig: (data) => request("PATCH", "/api/preparador/me/paypal", data),
+      paypalInvoicesIssued: () => request("GET", "/api/paypal/invoices/issued"),
+      createPaypalInvoice: (data) => request("POST", "/api/paypal/invoices", data),
+      markPaypalInvoicePaid: (id, data = {}) => request("POST", `/api/paypal/invoices/${id}/mark-paid`, data),
+      cancelPaypalInvoice: (id) => request("POST", `/api/paypal/invoices/${id}/cancel`),
     },
     opositor: {
       dashboard: () => request("GET", "/api/opositor/dashboard"),
@@ -116,6 +124,8 @@ const api = (() => {
       saveHabit: (data) => request("POST", "/api/opositor/habits", data),
       updateProfile: (data) => request("PATCH", "/api/opositor/profile", data),
       setPhoto: (fileId) => request("PATCH", "/api/opositor/photo", { fileId }),
+      // Facturas PayPal del preparador particular
+      paypalInvoices: () => request("GET", "/api/paypal/invoices/mine"),
     },
     files: {
       upload: (file, kind) => {
@@ -247,6 +257,134 @@ const api = (() => {
       npsTemplates: () => request("GET", "/api/admin/nps/templates"),
       npsResponses: () => request("GET", "/api/admin/nps/responses"),
       npsSend: (data) => request("POST", "/api/admin/nps/send", data),
+    },
+
+    // ─── FASE 6 ──────────────────────────────────────────────────────────
+    analytics: {
+      heatmap: (syllabusId) => request("GET", `/api/analytics/heatmap${syllabusId ? `?syllabusId=${syllabusId}` : ""}`),
+      mostFailed: (limit = 20) => request("GET", `/api/analytics/most-failed?limit=${limit}`),
+      groupComparison: () => request("GET", "/api/analytics/group-comparison"),
+      opositorPerformance: (id) => request("GET", `/api/analytics/opositor/${id}/performance`),
+      abandonRisk: () => request("GET", "/api/analytics/abandon-risk"),
+    },
+    predictor: {
+      forecast: (params = {}) => {
+        const qs = new URLSearchParams(params).toString();
+        return request("GET", `/api/predictor/forecast${qs ? `?${qs}` : ""}`);
+      },
+      gap: (params = {}) => {
+        const qs = new URLSearchParams(params).toString();
+        return request("GET", `/api/predictor/gap${qs ? `?${qs}` : ""}`);
+      },
+    },
+    normative: {
+      list: (status) => request("GET", `/api/normative/alerts${status ? `?status=${status}` : ""}`),
+      setStatus: (id, status) => request("PATCH", `/api/normative/alerts/${id}`, { status }),
+      synthetic: (data = {}) => request("POST", "/api/normative/synthetic", data),
+    },
+    marketplace: {
+      list: (params = {}) => {
+        const qs = new URLSearchParams(params).toString();
+        return request("GET", `/api/marketplace/packs${qs ? `?${qs}` : ""}`);
+      },
+      myListings: () => request("GET", "/api/marketplace/my-listings"),
+      myPurchases: () => request("GET", "/api/marketplace/my-purchases"),
+      createListing: (data) => request("POST", "/api/marketplace/listings", data),
+      updateListing: (id, data) => request("PATCH", `/api/marketplace/listings/${id}`, data),
+      deleteListing: (id) => request("DELETE", `/api/marketplace/listings/${id}`),
+      buy: (id, licenseType = "license") => request("POST", `/api/marketplace/buy/${id}`, { licenseType }),
+    },
+    wellbeing: {
+      stressCheck: () => request("GET", "/api/wellbeing/stress-check"),
+      submitStress: (answers, notes) => request("POST", "/api/wellbeing/stress-check", { answers, notes }),
+      stressHistory: (limit = 12) => request("GET", `/api/wellbeing/stress-history?limit=${limit}`),
+      resources: () => request("GET", "/api/wellbeing/resources"),
+      sustainability: () => request("GET", "/api/wellbeing/sustainability"),
+    },
+    simulacros: {
+      begin: (data) => request("POST", "/api/simulacros/begin", data),
+      answer: (id, data) => request("POST", `/api/simulacros/${id}/answer`, data),
+      finish: (id) => request("POST", `/api/simulacros/${id}/finish`),
+      mine: () => request("GET", "/api/simulacros/mine"),
+      analysis: (id) => request("GET", `/api/simulacros/${id}/analysis`),
+    },
+    multichannel: {
+      dailyQuestion: () => request("GET", "/api/multichannel/daily-question"),
+      studyRecap: (topicId) => request("GET", `/api/multichannel/study-recap?topicId=${topicId}`),
+      shareCardUrl: (qbId) => `/api/multichannel/share-card?qbId=${qbId}`,
+    },
+
+    // ─── FASE 6 ampliada ────────────────────────────────────────────────
+    certifications: {
+      levels: () => request("GET", "/api/certifications/levels"),
+      saveLevels: (levels) => request("PATCH", "/api/certifications/levels", { levels }),
+      mine: () => request("GET", "/api/certifications/mine"),
+      issue: (levelId, opositorId) => request("POST", `/api/certifications/issue/${levelId}`, opositorId ? { opositorId } : {}),
+      get: (id, code) => request("GET", `/api/certifications/${id}${code ? `?code=${code}` : ""}`),
+      renderUrl: (id) => `/api/certifications/${id}/render`,
+    },
+    alliances: {
+      mine: () => request("GET", "/api/alliances/mine"),
+      create: (data) => request("POST", "/api/alliances", data),
+      invite: (id, slug) => request("POST", `/api/alliances/${id}/invite`, { slug }),
+      invites: () => request("GET", "/api/alliances/invites"),
+      accept: (id) => request("POST", `/api/alliances/${id}/accept`),
+      leave: (id) => request("POST", `/api/alliances/${id}/leave`),
+      publishSimulacro: (id, data) => request("POST", `/api/alliances/${id}/publish-simulacro`, data),
+      simulacros: () => request("GET", "/api/alliances/simulacros"),
+    },
+    insurance: {
+      policies: () => request("GET", "/api/insurance/policies"),
+      createPolicy: (data) => request("POST", "/api/insurance/policies", data),
+      updatePolicy: (id, data) => request("PATCH", `/api/insurance/policies/${id}`, data),
+      enroll: (policyId) => request("POST", "/api/insurance/enroll", { policyId }),
+      mine: () => request("GET", "/api/insurance/mine"),
+      registerAttempt: (id, data) => request("POST", `/api/insurance/enrollments/${id}/register-attempt`, data),
+      claim: (id) => request("POST", `/api/insurance/enrollments/${id}/claim`),
+      reviewClaim: (id, claimId, status) => request("PATCH", `/api/insurance/enrollments/${id}/claims/${claimId}`, { status }),
+    },
+    crm: {
+      stages: () => request("GET", "/api/crm/stages"),
+      leads: (params = {}) => {
+        const qs = new URLSearchParams(params).toString();
+        return request("GET", `/api/crm/leads${qs ? `?${qs}` : ""}`);
+      },
+      createLead: (data) => request("POST", "/api/crm/leads", data),
+      updateLead: (id, data) => request("PATCH", `/api/crm/leads/${id}`, data),
+      deleteLead: (id) => request("DELETE", `/api/crm/leads/${id}`),
+      convertLead: (id, userId) => request("POST", `/api/crm/leads/${id}/convert`, { userId }),
+      alumni: () => request("GET", "/api/crm/alumni"),
+      addAlumnus: (data) => request("POST", "/api/crm/alumni", data),
+      updateAlumnus: (id, data) => request("PATCH", `/api/crm/alumni/${id}`, data),
+      mentors: () => request("GET", "/api/crm/mentors"),
+    },
+    audits: {
+      statuses: () => request("GET", "/api/audits/statuses"),
+      mine: () => request("GET", "/api/audits/mine"),
+      create: (data) => request("POST", "/api/audits", data),
+      comment: (id, message) => request("POST", `/api/audits/${id}/comment`, { message }),
+      update: (id, data) => request("PATCH", `/api/audits/${id}`, data),
+      all: () => request("GET", "/api/audits/all"),
+    },
+    community: {
+      streak: () => request("GET", "/api/community/streak"),
+      leaderboard: () => request("GET", "/api/community/leaderboard"),
+      rooms: () => request("GET", "/api/community/study-rooms"),
+      createRoom: (data) => request("POST", "/api/community/study-rooms", data),
+      joinRoom: (id) => request("POST", `/api/community/study-rooms/${id}/join`),
+      leaveRoom: (id) => request("POST", `/api/community/study-rooms/${id}/leave`),
+      roomState: (id) => request("GET", `/api/community/study-rooms/${id}/state`),
+      duels: () => request("GET", "/api/community/duels/mine"),
+      createDuel: (data) => request("POST", "/api/community/duels", data),
+      acceptDuel: (id) => request("POST", `/api/community/duels/${id}/accept`),
+      submitDuel: (id, answers) => request("POST", `/api/community/duels/${id}/submit`, { answers }),
+      forumThreads: (topicTag) => request("GET", `/api/community/forum/threads${topicTag ? `?topicTag=${topicTag}` : ""}`),
+      createThread: (data) => request("POST", "/api/community/forum/threads", data),
+      replyThread: (id, body) => request("POST", `/api/community/forum/threads/${id}/reply`, { body }),
+      requestMentoring: (mentorAlumnusId, message) => request("POST", "/api/community/mentoring/request", { mentorAlumnusId, message }),
+    },
+    schedule: {
+      reportSchedule: (assignmentId, enabled, frequency) => request("PATCH", `/api/preparador/assignments/${assignmentId}/report-schedule`, { enabled, frequency }),
     },
   };
 })();

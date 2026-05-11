@@ -89,11 +89,19 @@ module.exports = function chatRoutes({ env }) {
     const opositor = db.findOne("users", (u) => u.id === req.user.id);
     if (!opositor) return res.status(404).json({ error: "not_found" });
     const mode = chatModeFor(opositor);
+    const org = db.findOne("organizations", (o) => o.id === opositor.organizationId);
+    // White-label IA tutora (catálogo §A.10.5)
+    const persona = org?.tutorPersona || {};
     res.json({
       enabled: !!opositor.chatbotEnabled,
       mode,
       modeLabel: CHATBOT_MODES.find((m) => m.id === mode)?.label || mode,
       hasPersonalAi: !!opositor.ai?.enabled,
+      tutor: {
+        name: persona.name || "Asistente IA",
+        avatar: persona.avatar || "🤖",
+        greeting: persona.greeting || "¿En qué puedo ayudarte?",
+      },
     });
   });
 
@@ -196,7 +204,34 @@ module.exports = function chatRoutes({ env }) {
     // En modo auto, llamamos a la IA
     const ai = getAi(opositor);
     const context = buildContext(opositor);
-    const system = `Eres un asistente educativo para opositores españoles. Responde en español de forma clara, concisa y amable. Cita el BOE o la normativa aplicable cuando proceda. Información del estudiante:\n${context}\n\nIMPORTANTE: tus respuestas son revisadas por su preparador. No inventes datos ni cifras. Si no estás seguro, dilo.`;
+    const org = db.findOne("organizations", (o) => o.id === opositor.organizationId);
+    // White-label IA tutora (catálogo §A.10.5): la academia personaliza
+    // nombre, persona y tono. Si no hay configuración, fallback genérico.
+    const persona = org?.tutorPersona || {};
+    const tutorName = persona.name || "Asistente";
+    const tone = persona.tone || "claro, conciso y amable";
+    const customSystem = persona.systemAddon || "";
+
+    // RAG: si la academia tiene corpus indexado, recuperamos top-K chunks
+    // relevantes a la pregunta y los inyectamos en el system prompt.
+    let ragBlock = "";
+    try {
+      const rag = require("../lib/rag");
+      const result = await rag.retrieve({
+        orgId: opositor.organizationId, query: text,
+        user: opositor, env: env || process.env, k: 4,
+      });
+      if (result.hits && result.hits.length) {
+        // Filtramos por umbral mínimo de similitud (0.4 con cosine — ajustable).
+        const relevant = result.hits.filter((h) => h.score >= 0.4);
+        if (relevant.length) ragBlock = "\n\n" + rag.buildContextBlock(relevant);
+      }
+    } catch (e) {
+      console.error("[chat:rag]", e);
+      // Sin RAG, seguimos: el chat funciona igual sin corpus indexado
+    }
+
+    const system = `Eres ${tutorName}, un asistente educativo para opositores españoles${persona.role ? ` especializado en ${persona.role}` : ""}. Responde en español de forma ${tone}. Cita el BOE o la normativa aplicable cuando proceda.${customSystem ? `\n\n${customSystem}` : ""}\n\nInformación del estudiante:\n${context}${ragBlock}\n\nIMPORTANTE: tus respuestas son revisadas por su preparador. No inventes datos ni cifras. Si no estás seguro, dilo.`;
     const history = (t.messages || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", text: m.text }));
 
     let aiResponse;

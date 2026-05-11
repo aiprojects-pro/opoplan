@@ -86,6 +86,63 @@ module.exports = function rolesRoutes() {
     res.json({ topic });
   });
 
+  // ── Subida masiva de temas (preparador o admin) ───────────────────────────
+  // Acepta texto pegado (numeración variada) o CSV. Soporta:
+  //   - replace=true: vacía el temario actual antes de insertar
+  //   - dryRun=true: parsea y devuelve resultado SIN persistir (preview)
+  // Body: { text, format?, replace?, dryRun? }
+  r.post("/preparador/syllabi/:id/topics/bulk", auth.requireRole("preparador", "admin"), (req, res) => {
+    // Permisos: el preparador solo modifica sus syllabi, el admin los de su academia
+    let s;
+    if (req.user.role === "preparador") {
+      s = db.findOne("syllabi", (x) => x.id === req.params.id && x.preparadorId === req.user.id);
+    } else {
+      s = db.findOne("syllabi", (x) => x.id === req.params.id && x.organizationId === req.user.organizationId);
+    }
+    if (!s) return res.status(404).json({ error: "not_found" });
+    const { text, format, replace = false, dryRun = false } = req.body || {};
+    if (!text || !String(text).trim()) return res.status(400).json({ error: "missing_text" });
+    const parser = require("../lib/topicsBulkParser");
+    const parsed = parser.parse(text, format);
+    if (!parsed.topics.length) {
+      return res.status(400).json({
+        error: "no_topics_parsed",
+        format: parsed.format,
+        errors: parsed.errors,
+      });
+    }
+    if (dryRun) {
+      return res.json({
+        preview: true,
+        format: parsed.format,
+        wouldAdd: parsed.topics.length,
+        wouldReplace: !!replace,
+        currentCount: s.topics.length,
+        sample: parsed.topics.slice(0, 5),
+        errors: parsed.errors,
+      });
+    }
+    // Construimos los temas con id y campos por defecto
+    const newTopics = parsed.topics.map((t) => ({
+      id: db.id("t"),
+      block: t.block || "",
+      number: t.number || "",
+      title: t.title || "Sin título",
+      difficulty: t.difficulty || "Media",
+      priority: t.priority || "Alta",
+      attachments: [],
+    }));
+    const topics = replace ? newTopics : [...(s.topics || []), ...newTopics];
+    db.update("syllabi", (x) => x.id === s.id, { topics });
+    res.json({
+      added: newTopics.length,
+      total: topics.length,
+      format: parsed.format,
+      errors: parsed.errors,
+      replaced: !!replace,
+    });
+  });
+
   // Ver compromiso/plan de un opositor concreto (transcripción ~20:38)
   r.get("/preparador/opositores/:id/commitment", auth.requireRole("preparador", "admin", "superadmin"), (req, res) => {
     const orgId = req.user.organizationId;
@@ -311,6 +368,25 @@ module.exports = function rolesRoutes() {
       notes: req.body.notes || "",
     });
     res.json({ habit: h });
+  });
+
+  // Programar informes automáticos por asignación (catálogo §A.5).
+  // Solo el preparador asignado o el admin pueden modificarlo.
+  r.patch("/preparador/assignments/:id/report-schedule", auth.requireRole("preparador", "admin", "superadmin"), (req, res) => {
+    const a = db.findOne("assignments", (x) => x.id === req.params.id && x.organizationId === req.user.organizationId);
+    if (!a) return res.status(404).json({ error: "not_found" });
+    if (req.user.role === "preparador" && a.preparadorId !== req.user.id) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const { enabled, frequency } = req.body || {};
+    if (enabled && !["weekly", "fortnightly", "monthly"].includes(frequency)) {
+      return res.status(400).json({ error: "invalid_frequency" });
+    }
+    const next = enabled
+      ? { enabled: true, frequency, lastSentAt: a.reportSchedule?.lastSentAt || null }
+      : { enabled: false, frequency: a.reportSchedule?.frequency || "monthly", lastSentAt: a.reportSchedule?.lastSentAt || null };
+    const updated = db.update("assignments", (x) => x.id === a.id, { reportSchedule: next });
+    res.json({ assignment: updated });
   });
 
   return r;

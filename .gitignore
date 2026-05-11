@@ -1,6 +1,15 @@
 node_modules/
 .env
+.env.local
+.env.*.local
 data/app-data.json
+data/app-data.sqlite
+data/app-data.sqlite-journal
+data/app-data.sqlite-wal
+data/app-data.sqlite-shm
+data/.vapid.json
 data/*.tmp
+uploads/
 npm-debug.log*
 .DS_Store
+*.log

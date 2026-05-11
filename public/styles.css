@@ -1342,3 +1342,111 @@ body.role-superadmin .org-badge::after {
 .dropzone span { font-size: 0.85rem; color: var(--muted); }
 .dropzone-files { width: 100%; margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 
+
+/* ─── FASE 6: Catálogo extendido ─────────────────────────────────────────── */
+
+/* Mapa de calor del temario (catálogo §A.3) */
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+.heatmap-cell {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  padding: 8px 4px;
+  text-align: center;
+  font-size: 0.85rem;
+  cursor: help;
+  transition: transform 0.15s;
+}
+.heatmap-cell:hover { transform: scale(1.04); }
+.heatmap-cell strong { font-size: 1.1rem; line-height: 1; }
+.heatmap-cell small { font-size: 1.4rem; font-weight: 700; line-height: 1; margin: 4px 0 2px; }
+.heatmap-cell em { font-style: normal; opacity: 0.8; font-size: 0.75rem; }
+
+/* Pills con estado activo (simulacro: opciones, confianza) */
+.pill.active,
+button.pill.active {
+  background: var(--brand);
+  color: white;
+  border-color: var(--brand);
+}
+
+/* Texto justificado y sangría para .markdown del bienestar */
+.markdown h4 { margin-top: 12px; margin-bottom: 6px; font-size: 0.95rem; }
+.markdown ul { margin: 6px 0 6px 20px; }
+.markdown li { margin: 3px 0; }
+.markdown p { margin: 6px 0; }
+
+/* Card "interna" — usada en biblioteca de bienestar dentro de un card */
+.card-inner {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface, #fff);
+}
+
+/* Tabs (marketplace) */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--line);
+  margin-bottom: 16px;
+}
+.tabs button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  padding: 10px 16px;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tabs button:hover { color: var(--ink); }
+.tabs button.active {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+}
+
+/* Barras de ROI en predictor */
+.bar { transition: width 0.3s ease; }
+
+/* Botón con texto a la izquierda (opciones del simulacro) */
+button.text-left { text-align: left; }
+
+/* ─── FASE 6 ampliada ───────────────────────────────────────────────────── */
+
+/* Blockquote de testimonios de alumni */
+blockquote {
+  border-left: 3px solid var(--brand);
+  padding: 4px 0 4px 12px;
+  margin: 8px 0;
+  font-style: italic;
+  color: var(--muted);
+  background: rgba(21, 94, 168, 0.04);
+}
+
+/* Botones disabled (sala llena) */
+button[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* Anchor con estilo de botón ghost (Mis certificaciones → ver SVG) */
+a.ghost {
+  display: inline-block;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--surface, #fff);
+}
+a.ghost:hover { background: rgba(21, 94, 168, 0.05); border-color: var(--brand); color: var(--brand); }

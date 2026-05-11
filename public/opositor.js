@@ -20,6 +20,18 @@ const opositorView = (() => {
 
   async function load() {
     state.data = await api.opositor.dashboard();
+    // Si el plan existe pero no tiene los campos de la planificación mejorada
+    // (weeksUntilExam, feasibility, topicTitle...), forzamos un replan para
+    // que el opositor vea el widget visual con datos completos. Esto solo
+    // afecta a planes generados antes de la mejora.
+    const plan = state.data?.plan;
+    const hasNewFields = plan && (plan.weeksUntilExam !== undefined || (plan.tasks || []).some((t) => t.topicTitle));
+    if (plan && plan.tasks && plan.tasks.length && !hasNewFields) {
+      try {
+        const r = await api.opositor.replan({ preserveDone: true });
+        if (r?.plan) state.data.plan = r.plan;
+      } catch { /* silencioso, no bloqueamos arranque */ }
+    }
   }
 
   async function loadAgenda() {
@@ -84,7 +96,13 @@ const opositorView = (() => {
             <button data-section="challenges" ${state.section === "challenges" ? 'class="active"' : ""}>🏆 Retos</button>
             <button data-section="profile" ${state.section === "profile" ? 'class="active"' : ""}>👤 Mi perfil</button>
             <button data-section="billing" ${state.section === "billing" ? 'class="active"' : ""}>💳 Mi suscripción</button>
+            <button data-section="invoices" ${state.section === "invoices" ? 'class="active"' : ""}>🧾 Mis facturas</button>
             <button data-section="commitment" ${state.section === "commitment" ? 'class="active"' : ""}>🎯 Compromiso</button>
+            <button data-section="predictor" ${state.section === "predictor" ? 'class="active"' : ""}>🔮 Predictor</button>
+            <button data-section="wellbeing" ${state.section === "wellbeing" ? 'class="active"' : ""}>🧘 Bienestar</button>
+            <button data-section="simulacro" ${state.section === "simulacro" ? 'class="active"' : ""}>🧪 Simulacro avanzado</button>
+            <button data-section="community" ${state.section === "community" ? 'class="active"' : ""}>👥 Comunidad</button>
+            <button data-section="certs" ${state.section === "certs" ? 'class="active"' : ""}>🎖️ Mis certificaciones</button>
             <button data-section="nps" ${state.section === "nps" ? 'class="active"' : ""}>📝 Encuesta</button>
           </nav>
           <div class="sidebar-footer"><button class="ghost" id="logout-btn">Cerrar sesión</button></div>
@@ -362,14 +380,175 @@ const opositorView = (() => {
   // ── Mi plan (vista detallada con observaciones) ──────────────────────────
 
   function planSection() {
-    const tasks = state.data?.plan?.tasks || [];
+    const plan = state.data?.plan;
+    const tasks = plan?.tasks || [];
     return `
       <div class="section-head">
         <div><p class="eyebrow">Mi planificación</p><h1>Plan detallado</h1></div>
         <button class="ghost sm" id="replan-btn">↻ Recalcular</button>
       </div>
-      ${tasks.length === 0 ? `<div class="empty-state"><h3>Sin plan generado</h3><p>Define tu compromiso para generar tu plan personalizado.</p></div>` : ""}
+      ${tasks.length === 0
+        ? `<div class="empty-state"><h3>Sin plan generado</h3><p>Define tu compromiso para generar tu plan personalizado.</p></div>`
+        : `${planSummary(plan)}${planByTopicWidget(plan)}${planByDayTable(tasks)}`}
+    `;
+  }
+
+  // Widget superior con KPIs del plan (semanas hasta examen, factibilidad…)
+  function planSummary(plan) {
+    if (!plan) return "";
+    const weeks = plan.weeksUntilExam;
+    const totalTopics = plan.totalTopics || 0;
+    const feasibilityPill = plan.feasibility === "tight"
+      ? `<span class="pill" style="background:rgba(217,38,38,0.15);color:#d92626;">⚠️ Ajustado</span>`
+      : plan.feasibility === "ok"
+      ? `<span class="pill" style="background:rgba(12,143,111,0.15);color:#0c8f6f;">✓ Viable</span>`
+      : `<span class="pill muted">Sin fecha de examen</span>`;
+    return `
+      <div class="grid cols-4 gap-3 mb-4">
+        <div class="card text-center">
+          <small class="muted">Semanas al examen</small>
+          <div style="font-size:1.8em;font-weight:800;color:${weeks && weeks <= 4 ? "#d92626" : weeks && weeks <= 12 ? "#d97706" : "#155ea8"};">
+            ${weeks != null ? weeks : "—"}
+          </div>
+          <small>${weeks != null ? "semanas restantes" : "configura fecha"}</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Temas en el temario</small>
+          <div style="font-size:1.8em;font-weight:800;">${totalTopics}</div>
+          <small>en tu temario actual</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Sesiones/semana</small>
+          <div style="font-size:1.8em;font-weight:800;">${plan.weeklyCapacity || tasks.length || 0}</div>
+          <small>bloques de estudio</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Factibilidad</small>
+          <div style="margin-top:8px;">${feasibilityPill}</div>
+          ${plan.totalSessionsNeeded ? `<small>${plan.totalSessionsNeeded} sesiones necesarias</small>` : ""}
+        </div>
+      </div>
+      ${plan.feasibilityNote ? `
+        <div class="card mb-4" style="border-left:4px solid #d92626;background:rgba(217,38,38,0.04);">
+          <p style="margin:0;"><strong>⚠️ Aviso:</strong> ${ui.esc(plan.feasibilityNote)}</p>
+        </div>` : ""}
+      ${plan.recommendation && !plan.feasibilityNote ? `
+        <div class="card mb-4" style="border-left:4px solid #155ea8;">
+          <p class="muted text-sm" style="margin:0 0 4px;">Recomendación</p>
+          <p style="margin:0;">${ui.esc(plan.recommendation)}</p>
+        </div>` : ""}
+    `;
+  }
+
+  // Widget visual: lista de temas con barra de progreso, sesiones planificadas
+  // y completadas. Usa los topicTitle/topicNumber reales que ahora expone el
+  // planificador (replan.js mejorado).
+  function planByTopicWidget(plan) {
+    const tasks = plan?.tasks || [];
+    // Agrupar tareas por topicId
+    const byTopic = new Map();
+    for (const t of tasks) {
+      if (!t.topicId) continue;
+      const key = t.topicId;
+      if (!byTopic.has(key)) {
+        byTopic.set(key, {
+          topicId: t.topicId,
+          topicNumber: t.topicNumber || "",
+          topicTitle: t.topicTitle || t.title,
+          topicDifficulty: t.topicDifficulty,
+          topicPriority: t.topicPriority,
+          totalSessions: 0,
+          doneSessions: 0,
+          totalMinutes: 0,
+          doneMinutes: 0,
+          types: { Estudio: 0, Repaso: 0, Simulacro: 0 },
+        });
+      }
+      const tt = byTopic.get(key);
+      tt.totalSessions += 1;
+      tt.totalMinutes += Number(t.minutes || 0);
+      tt.types[t.type] = (tt.types[t.type] || 0) + 1;
+      const compliance = t.compliance || (t.done ? "full" : "none");
+      if (compliance === "full") {
+        tt.doneSessions += 1;
+        tt.doneMinutes += Number(t.minutes || 0);
+      } else if (compliance === "partial") {
+        tt.doneSessions += 0.5;
+        tt.doneMinutes += Number(t.minutes || 0) * 0.5;
+      }
+    }
+    const topics = Array.from(byTopic.values());
+    if (!topics.length) return "";
+
+    // Ordenar: primero los que tienen prioridad más alta y menos progreso
+    topics.sort((a, b) => {
+      const pa = priorityRank(a.topicPriority);
+      const pb = priorityRank(b.topicPriority);
+      if (pb !== pa) return pb - pa;
+      const progA = a.doneSessions / Math.max(1, a.totalSessions);
+      const progB = b.doneSessions / Math.max(1, b.totalSessions);
+      return progA - progB;
+    });
+
+    return `
+      <div class="card mb-4">
+        <h3 style="margin:0 0 4px;">📚 Progreso por tema</h3>
+        <p class="muted text-sm" style="margin:0 0 16px;">Sesiones programadas y completadas por cada tema del temario, ordenado por prioridad y progreso.</p>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          ${topics.map((t) => renderTopicProgress(t)).join("")}
+        </div>
+      </div>`;
+  }
+
+  function priorityRank(p) {
+    return { "Muy alta": 4, Alta: 3, Media: 2, Baja: 1 }[p] || 0;
+  }
+
+  function renderTopicProgress(t) {
+    const pct = Math.round((t.doneSessions / Math.max(1, t.totalSessions)) * 100);
+    const barColor = pct >= 80 ? "#0c8f6f" : pct >= 50 ? "#155ea8" : pct >= 25 ? "#d97706" : "#d92626";
+    const difficultyColor = t.topicDifficulty === "Alta" ? "#d92626" : t.topicDifficulty === "Baja" ? "#94a3b8" : "#d97706";
+    const priorityColor = t.topicPriority === "Muy alta" ? "#d92626" : t.topicPriority === "Alta" ? "#d97706" : "#94a3b8";
+    return `
+      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px;">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong>${ui.esc(t.topicNumber)}</strong>
+              <span>${ui.esc(t.topicTitle)}</span>
+            </div>
+            <div class="row gap-2 mt-1" style="flex-wrap:wrap;">
+              ${t.topicDifficulty ? `<span class="pill" style="background:${hexA(difficultyColor, 0.15)};color:${difficultyColor};font-size:11px;">Dif. ${ui.esc(t.topicDifficulty)}</span>` : ""}
+              ${t.topicPriority ? `<span class="pill" style="background:${hexA(priorityColor, 0.15)};color:${priorityColor};font-size:11px;">Prioridad ${ui.esc(t.topicPriority)}</span>` : ""}
+              <span class="pill muted" style="font-size:11px;">${t.types.Estudio || 0}E · ${t.types.Repaso || 0}R · ${t.types.Simulacro || 0}S</span>
+              <span class="pill muted" style="font-size:11px;">${Math.round(t.totalMinutes / 60 * 10) / 10}h totales</span>
+            </div>
+          </div>
+          <div style="text-align:right;min-width:100px;">
+            <div style="font-size:1.4em;font-weight:800;color:${barColor};">${pct}%</div>
+            <small class="muted">${Math.round(t.doneSessions)} / ${t.totalSessions}</small>
+          </div>
+        </div>
+        <div style="height:8px;background:#eef2f7;border-radius:4px;margin-top:10px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${barColor};transition:width 0.3s;"></div>
+        </div>
+      </div>`;
+  }
+
+  function hexA(hex, alpha) {
+    // Convierte #rrggbb + alpha → rgba()
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (!m) return hex;
+    const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  // Tabla diaria del plan (lo que estaba antes, ahora más abajo)
+  function planByDayTable(tasks) {
+    return `
       <div class="card">
+        <h3 style="margin:0 0 4px;">🗓️ Plan semanal</h3>
+        <p class="muted text-sm" style="margin:0 0 12px;">Tareas distribuidas por día. Marca cumplimiento al terminar cada bloque.</p>
         <div class="table">
           <div class="table-row header"><span>Día</span><span>Tarea</span><span>Tipo</span><span>Cumplimiento</span><span></span></div>
           ${tasks.map((t) => {
@@ -1158,6 +1337,632 @@ const opositorView = (() => {
     return new Date(d + "T00:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
   }
 
+  // ── FASE 6: Predictor de fecha óptima (catálogo §B.3) ───────────────────
+
+  function predictorSection() {
+    const f = state.forecast;
+    const gap = state.gap;
+    if (!f) return `<div class="section-head"><h1>🔮 Predictor</h1></div><div class="empty-state">Cargando…</div>`;
+    if (!f.ready) {
+      return `<div class="section-head"><h1>🔮 Predictor</h1></div>
+        <div class="card"><p>${ui.esc(f.message || "Aún no tienes datos suficientes")}</p>
+        <p class="muted text-sm">Realiza al menos un simulacro avanzado para que el sistema pueda calcular tu previsión.</p></div>`;
+    }
+    const probColor = f.todayPassProbability >= 70 ? "#0c8f6f" : f.todayPassProbability >= 40 ? "#d97706" : "#dc2626";
+    const trendIcon = f.trend === "mejorando" ? "📈" : f.trend === "deteriorando" ? "📉" : "➡️";
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Cálculo sobre tus simulacros</p><h1>🔮 ¿Cuándo estoy listo?</h1></div>
+      </div>
+      <p class="muted mb-4">Modelo de regresión lineal sobre tus últimos ${f.recentN} simulacros + brecha al umbral. <strong>Es una orientación, no un oráculo:</strong> recalibra cada simulacro y depende mucho de la calidad de tu banco de preguntas.</p>
+
+      ${f.lowConfidence ? `
+        <div class="card mb-4" style="border-left:4px solid #d97706;background:rgba(217,119,6,0.06);">
+          <strong>⚠️ Datos limitados</strong>
+          <p class="text-sm">${ui.esc(f.confidenceMessage)}</p>
+        </div>` : ""}
+
+      <div class="grid cols-3 gap-3 mb-4">
+        <div class="card text-center">
+          <small class="muted">Tu nota proyectada hoy</small>
+          <div style="font-size:2.4em;font-weight:800;color:${probColor};">${f.todayProjectedScore}</div>
+          <small>media últimos ${f.recentN} = ${f.recentMean} ± ${f.recentStd}</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Probabilidad de aprobar HOY</small>
+          <div style="font-size:2.4em;font-weight:800;color:${probColor};">${f.todayPassProbability}%</div>
+          <small>umbral: ${f.threshold}/10</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Tendencia ${trendIcon}</small>
+          <div style="font-size:1.6em;font-weight:700;text-transform:capitalize;">${ui.esc(f.trend)}</div>
+          <small>${f.slopePerDay >= 0 ? "+" : ""}${(f.slopePerDay * 7).toFixed(2)} pts/semana</small>
+        </div>
+      </div>
+
+      ${f.examDate ? `
+        <div class="card mb-4" style="border-left:4px solid ${probColor};">
+          <h3>📅 En tu fecha de examen (${ui.esc(f.examDate)})</h3>
+          <p>Probabilidad estimada de aprobar: <strong style="color:${probColor};font-size:1.3em;">${f.probAtExam}%</strong></p>
+          ${f.probAtExam < 50 ? `<p class="muted text-sm">⚠️ Si mantienes el ritmo actual, vas justo. Considera aumentar carga o pedir más tutorías.</p>` : ""}
+        </div>` : ""}
+
+      ${f.projectedReadyDate ? `
+        <div class="card mb-4">
+          <h3>🎯 Fecha estimada de "estar listo"</h3>
+          <p>Si mantienes este ritmo, alcanzarás un ${f.threshold}/10 estable hacia <strong>${ui.esc(f.projectedReadyDate)}</strong> (${f.daysToReachThreshold} días).</p>
+        </div>` : f.todayProjectedScore >= f.threshold ? `
+        <div class="card mb-4" style="background:rgba(12,143,111,0.08);">
+          <h3>✓ Ya estás en el umbral</h3>
+          <p>Tu proyección actual ya supera el ${f.threshold}/10. Trabaja la consistencia (reducir desviación estándar).</p>
+        </div>` : ""}
+
+      ${gap && gap.length ? `
+        <div class="card">
+          <h3>🎯 ROI por tema (dónde rinde más estudiar)</h3>
+          <p class="muted text-sm mb-3">Brecha de aciertos × peso del tema. Empieza por arriba.</p>
+          <div class="table">
+            <div class="table-row header"><span>Tema</span><span>Tu acierto</span><span>ROI</span></div>
+            ${gap.slice(0, 10).map((t) => `
+              <div class="table-row">
+                <span><strong>${ui.esc(t.number || "")}</strong> ${ui.esc(t.title)}</span>
+                <span>${t.hitRatePct === null ? `<small class="muted">sin datos</small>` : `<strong>${t.hitRatePct}%</strong>`}</span>
+                <span><div class="bar" style="background:#155ea8;width:${Math.round(t.roi * 100)}%;height:8px;border-radius:4px;"></div><small>${t.roi.toFixed(2)}</small></span>
+              </div>`).join("")}
+          </div>
+        </div>` : ""}`;
+  }
+
+  async function loadPredictor() {
+    try {
+      const [f, g] = await Promise.all([
+        api.predictor.forecast(),
+        api.predictor.gap(),
+      ]);
+      state.forecast = f.forecast;
+      state.gap = g.gap;
+    } catch (e) {
+      state.forecast = { ready: false, message: "Error al calcular." };
+      state.gap = null;
+    }
+  }
+
+  // ── FASE 6: Bienestar (catálogo §B.7) ──────────────────────────────────
+
+  function wellbeingSection() {
+    const sc = state.stressCheck;
+    const hist = state.stressHistory || [];
+    const sus = state.sustainability;
+    const res = state.wellbeingResources || [];
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Tu bienestar también aprueba</p><h1>🧘 Salud mental y ritmo sostenible</h1></div>
+      </div>
+
+      ${sus ? `
+        <div class="card mb-4" style="border-left:4px solid ${sus.riskScore >= 60 ? "#dc2626" : sus.riskScore >= 35 ? "#d97706" : "#0c8f6f"};">
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <div>
+              <small class="muted">Indicador de sostenibilidad</small>
+              <h3>${sus.riskScore >= 60 ? "Riesgo de agotamiento" : sus.riskScore >= 35 ? "Carga moderada-alta" : "Ritmo sostenible"}</h3>
+              <p class="text-sm">${ui.esc(sus.advice)}</p>
+            </div>
+            <div class="text-center">
+              <div style="font-size:2.5em;font-weight:800;color:${sus.riskScore >= 60 ? "#dc2626" : sus.riskScore >= 35 ? "#d97706" : "#0c8f6f"};">${sus.riskScore}</div>
+              <small class="muted">${sus.avgHoursPerDay}h/día · estrés ${sus.stressScore}</small>
+            </div>
+          </div>
+        </div>` : ""}
+
+      <div class="card mb-4">
+        <h3>📊 Cuestionario semanal de estrés</h3>
+        ${sc?.alreadyAnswered ? `
+          <p>Esta semana ya respondiste el ${ui.esc(sc.last.weekOf)}: <strong style="color:${sc.last.label.color};">${ui.esc(sc.last.label.label)}</strong> (${sc.last.score}/25).</p>
+          <button class="ghost sm" id="redo-stress">Modificar respuestas</button>
+        ` : sc ? `
+          <p class="muted text-sm mb-3">Tu respuesta es privada. Se usa solo para ajustar tu plan de estudio y avisarte si necesitas reducir carga.</p>
+          <form id="stress-form" class="form">
+            ${sc.questions.map((q) => `
+              <label>${ui.esc(q.text)}
+                <div class="row gap-2 mt-1">
+                  ${[1,2,3,4,5].map((v) => `<label class="pill" style="cursor:pointer;"><input type="radio" name="${q.id}" value="${v}" ${v === 3 ? "checked" : ""} style="margin-right:4px;"/>${v}</label>`).join("")}
+                </div>
+                <small class="muted">1 = nada · 5 = totalmente</small>
+              </label>`).join("")}
+            <button type="submit" class="btn">Guardar respuesta</button>
+          </form>
+        ` : `<p class="muted">Cargando…</p>`}
+
+        ${hist.length > 1 ? `
+          <div class="mt-4">
+            <h4 class="text-sm muted">Tus últimas ${hist.length} semanas</h4>
+            <div class="row gap-1 mt-2" style="align-items:flex-end;height:80px;">
+              ${hist.map((h) => `<div title="${h.weekOf}: ${h.score}" style="flex:1;background:${h.label.color};height:${(h.score / 25) * 100}%;border-radius:3px 3px 0 0;min-height:4px;"></div>`).join("")}
+            </div>
+            <small class="muted">Verde: bajo · Azul: moderado · Naranja: alto · Rojo: agotamiento</small>
+          </div>` : ""}
+      </div>
+
+      <div class="card">
+        <h3>📚 Biblioteca de recursos</h3>
+        <p class="muted text-sm mb-3">Técnicas breves y validadas para gestionar la carga de estudio. Léelas con tiempo y vuelve cuando lo necesites.</p>
+        <div class="grid cols-2 gap-3">
+          ${res.map((r) => `
+            <div class="card-inner">
+              <small class="pill muted">${ui.esc(r.kind)}${r.durationSec ? ` · ${Math.round(r.durationSec / 60)} min` : ""}</small>
+              <h4>${ui.esc(r.title)}</h4>
+              <p class="text-sm">${ui.esc(r.description)}</p>
+              <details><summary class="muted text-sm" style="cursor:pointer;">Leer técnica</summary>
+                <div class="markdown text-sm mt-2" style="line-height:1.6;">${renderSimpleMarkdown(r.body)}</div>
+                ${window.__audio?.available ? `<div class="row gap-2 mt-2"><button class="ghost sm" data-tts-resource="${r.id}">🔊 Escuchar</button></div>` : ""}
+              </details>
+            </div>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  function renderSimpleMarkdown(md) {
+    // Renderizado mínimo: ## headings, **bold**, listas con -, párrafos.
+    return ui.esc(md)
+      .replace(/^## (.+)$/gm, "<h4>$1</h4>")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/^- (.+)$/gm, "<li>$1</li>")
+      .replace(/(<li>.+?<\/li>\n?)+/gs, (m) => `<ul>${m}</ul>`)
+      .replace(/\n\n/g, "</p><p>")
+      .replace(/^/, "<p>")
+      .replace(/$/, "</p>")
+      .replace(/<p><h4>/g, "<h4>").replace(/<\/h4><\/p>/g, "</h4>")
+      .replace(/<p><ul>/g, "<ul>").replace(/<\/ul><\/p>/g, "</ul>");
+  }
+
+  async function loadWellbeing() {
+    try {
+      const [sc, hist, res, sus] = await Promise.all([
+        api.wellbeing.stressCheck(),
+        api.wellbeing.stressHistory(),
+        api.wellbeing.resources(),
+        api.wellbeing.sustainability(),
+      ]);
+      state.stressCheck = sc;
+      state.stressHistory = hist.history;
+      state.wellbeingResources = res.resources;
+      state.sustainability = sus;
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  // ── FASE 6: Simulacro avanzado (catálogo §A.6 / §B simulacros) ─────────
+
+  function simulacroSection() {
+    if (state.simulacroActive) return simulacroRunningView();
+    const list = state.simulacrosList || [];
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Más allá del cronómetro</p><h1>🧪 Simulacro con análisis cognitivo</h1></div>
+        <button class="btn" id="start-simulacro">+ Empezar simulacro</button>
+      </div>
+      <p class="muted mb-4">Cada pregunta registra tu tiempo, los cambios de respuesta y tu nivel de confianza declarado. Al terminar, ves tu mapa de vulnerabilidad y calibración (¿confías cuando aciertas y dudas cuando fallas?).</p>
+
+      ${list.length === 0 ? `<div class="empty-state"><h3>Sin simulacros previos</h3><p>Empieza el primero con el botón de arriba.</p></div>` : `
+        <div class="card">
+          <h3>Tus simulacros</h3>
+          <div class="table mt-2">
+            <div class="table-row header"><span>Fecha</span><span>Preguntas</span><span>Tiempo</span><span>Nota</span><span></span></div>
+            ${list.map((a) => `
+              <div class="table-row">
+                <span>${ui.esc((a.startedAt || "").slice(0, 16).replace("T", " "))}</span>
+                <span>${a.questionsCount}</span>
+                <span>${Math.round((a.durationSec || 0) / 60)} min</span>
+                <span><strong style="color:${(a.score || 0) >= 5 ? "#0c8f6f" : "#dc2626"};">${a.score ?? "—"}</strong></span>
+                <span>${a.finishedAt ? `<button class="ghost sm" data-analysis="${a.id}">Análisis</button>` : `<small class="muted">en curso</small>`}</span>
+              </div>`).join("")}
+          </div>
+        </div>`}
+
+      ${state.lastAnalysis ? renderAnalysisCard(state.lastAnalysis) : ""}`;
+  }
+
+  function renderAnalysisCard(a) {
+    return `<div class="card mt-4">
+      <h3>🧠 Análisis cognitivo</h3>
+      <div class="grid cols-3 gap-3">
+        <div class="text-center"><small class="muted">Calibración</small><div style="font-size:1.8em;font-weight:700;">${a.calibrationPct ?? "—"}%</div><small>confianza ↔ resultado</small></div>
+        <div class="text-center"><small class="muted">Tiempo medio</small><div style="font-size:1.8em;font-weight:700;">${Math.round(a.avgTimeMs / 1000)}s</div><small>por pregunta</small></div>
+        <div class="text-center"><small class="muted">Cambios</small><div style="font-size:1.8em;font-weight:700;">${a.changersAccuracyPct ?? "—"}%</div><small>aciertos al cambiar (de ${a.changersCount})</small></div>
+      </div>
+      ${a.slowestQuestions.length ? `
+        <h4 class="mt-4 text-sm">Preguntas más lentas</h4>
+        <ul class="text-sm">${a.slowestQuestions.map((q) => `<li>${q.correct ? "✓" : "✗"} ${Math.round(q.timeMs / 1000)}s en pregunta ${q.idx + 1}</li>`).join("")}</ul>` : ""}
+      ${a.vulnerabilityMap.length ? `
+        <h4 class="mt-4 text-sm">Mapa de vulnerabilidad (acertaste pero con dudas)</h4>
+        <p class="text-sm muted">${a.vulnerabilityMap.length} preguntas que acertaste pero con baja confianza o muchos cambios. Repasa esos conceptos: en el examen real, bajo presión, podrían fallar.</p>` : ""}
+    </div>`;
+  }
+
+  function simulacroRunningView() {
+    const s = state.simulacroActive;
+    const idx = s.currentIdx;
+    const q = s.questions[idx];
+    if (!q) return "";
+    const elapsed = Math.round((Date.now() - s.questionStartedAt) / 1000);
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Pregunta ${idx + 1} de ${s.questions.length}</p><h1>🧪 Simulacro en curso</h1></div>
+        <div class="text-right"><small class="muted">Tiempo en pregunta</small><div style="font-size:1.4em;font-weight:700;" id="q-timer">${elapsed}s</div></div>
+      </div>
+      <div class="card">
+        <p class="text-sm muted">${ui.esc(q.norm || "")}</p>
+        <h3 style="line-height:1.5;">${ui.esc(q.text)}</h3>
+        <div class="grid cols-1 gap-2 mt-3">
+          ${q.options.map((opt, i) => `
+            <button class="ghost text-left ${s.localAnswers[idx]?.chosen === i ? "active" : ""}" data-q-opt="${i}" style="padding:14px;border-radius:8px;${s.localAnswers[idx]?.chosen === i ? "background:rgba(21,94,168,0.1);border-color:#155ea8;" : ""}">
+              <strong>${String.fromCharCode(65 + i)}.</strong> ${ui.esc(opt)}
+            </button>`).join("")}
+        </div>
+        <div class="row gap-2 mt-4" style="align-items:center;">
+          <small class="muted">Tu confianza:</small>
+          <button class="pill ${s.localAnswers[idx]?.confidence === "sure" ? "active" : ""}" data-q-conf="sure">Seguro/a</button>
+          <button class="pill ${s.localAnswers[idx]?.confidence === "doubt" ? "active" : ""}" data-q-conf="doubt">Dudoso/a</button>
+          <button class="pill ${s.localAnswers[idx]?.confidence === "guess" ? "active" : ""}" data-q-conf="guess">Adivinanza</button>
+        </div>
+        <div class="row gap-2 mt-4" style="justify-content:space-between;">
+          <button class="ghost" id="q-prev" ${idx === 0 ? "disabled" : ""}>← Anterior</button>
+          ${idx === s.questions.length - 1
+            ? `<button class="btn" id="q-finish">Terminar simulacro</button>`
+            : `<button class="btn" id="q-next">Siguiente →</button>`}
+        </div>
+      </div>`;
+  }
+
+  async function loadSimulacros() {
+    try {
+      const [r, p] = await Promise.all([
+        api.simulacros.mine(),
+        api.processes.list().catch(() => ({ processes: [] })),
+      ]);
+      state.simulacrosList = r.attempts || [];
+      state.processes = p.processes || [];
+    } catch (e) {
+      state.simulacrosList = [];
+      state.processes = [];
+    }
+  }
+
+  // ── FASE 6 ampliada: Comunidad (catálogo §B.5) ────────────────────────────
+
+  function communitySection() {
+    const tab = state.communityTab || "streak";
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">No estudias solo/a</p><h1>👥 Comunidad</h1></div>
+      </div>
+      <div class="tabs">
+        <button data-comm-tab="streak" class="${tab === "streak" ? "active" : ""}">Mi racha</button>
+        <button data-comm-tab="rooms" class="${tab === "rooms" ? "active" : ""}">Salas Pomodoro</button>
+        <button data-comm-tab="duels" class="${tab === "duels" ? "active" : ""}">Duelos</button>
+        <button data-comm-tab="forum" class="${tab === "forum" ? "active" : ""}">Foro</button>
+        <button data-comm-tab="mentors" class="${tab === "mentors" ? "active" : ""}">Mentores</button>
+      </div>
+      ${tab === "streak" ? renderStreakTab() : ""}
+      ${tab === "rooms" ? renderRoomsTab() : ""}
+      ${tab === "duels" ? renderDuelsTab() : ""}
+      ${tab === "forum" ? renderForumTab() : ""}
+      ${tab === "mentors" ? renderMentorsTab() : ""}`;
+  }
+
+  function renderStreakTab() {
+    const s = state.communityStreak || {};
+    const lb = state.communityLeaderboard || [];
+    return `
+      <div class="grid cols-3 gap-3 mb-4">
+        <div class="card text-center">
+          <small class="muted">Racha actual</small>
+          <div style="font-size:2.4em;font-weight:800;color:#d97706;">🔥 ${s.currentStreak || 0}</div>
+          <small>días consecutivos</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Mejor racha</small>
+          <div style="font-size:2.4em;font-weight:800;color:#0c8f6f;">🏆 ${s.bestStreak || 0}</div>
+          <small>histórica</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Días activos totales</small>
+          <div style="font-size:2.4em;font-weight:800;">${s.daysActive || 0}</div>
+          <small>desde que empezaste</small>
+        </div>
+      </div>
+      <div class="card">
+        <h3>🏅 Tabla de clasificación</h3>
+        <p class="muted text-sm mb-3">Solo aparecen opositores que han activado el ranking público en su perfil. Los puestos se calculan por racha actual.</p>
+        ${lb.length === 0 ? `<div class="empty-state">Sin datos.</div>` : `
+          <div class="table">
+            <div class="table-row header"><span>#</span><span>Opositor</span><span>Racha actual</span><span>Mejor</span></div>
+            ${lb.map((row, i) => `
+              <div class="table-row">
+                <span><strong>${i + 1}</strong></span>
+                <span>${ui.esc(row.name)}</span>
+                <span>🔥 ${row.currentStreak}</span>
+                <span>🏆 ${row.bestStreak}</span>
+              </div>`).join("")}
+          </div>`}
+      </div>`;
+  }
+
+  function renderRoomsTab() {
+    const rooms = state.studyRooms || [];
+    const active = state.activeRoom;
+    if (active) {
+      const remaining = Math.max(0, Math.round((new Date(active.phaseEndsAt).getTime() - Date.now()) / 1000));
+      const min = Math.floor(remaining / 60);
+      const sec = remaining % 60;
+      return `
+        <div class="card" style="border-left:4px solid ${active.currentPhase === "study" ? "#155ea8" : "#0c8f6f"};">
+          <div class="row" style="justify-content:space-between;align-items:flex-start;">
+            <div>
+              <small class="muted">${active.mode === "50_10" ? "50 / 10" : "25 / 5"} · ciclo ${active.cyclesCompleted + 1}</small>
+              <h3>${ui.esc(active.name)}</h3>
+              <p>Fase actual: <strong>${active.currentPhase === "study" ? "🎯 Estudio" : "☕ Descanso"}</strong></p>
+              <p>Miembros conectados: ${active.members.map((m) => ui.esc(m.name)).join(", ")}</p>
+            </div>
+            <div class="text-center">
+              <div style="font-size:3em;font-weight:800;font-family:monospace;color:${active.currentPhase === "study" ? "#155ea8" : "#0c8f6f"};">${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}</div>
+              <button class="ghost sm mt-2" id="leave-room">Salir de la sala</button>
+            </div>
+          </div>
+          <p class="muted text-sm mt-3">El temporizador se sincroniza haciendo polling cada 10s. Al terminar la fase, todos los miembros pasan a la siguiente automáticamente.</p>
+        </div>`;
+    }
+    return `
+      <div class="row mb-3" style="justify-content:flex-end;">
+        <button class="btn" id="new-room">+ Crear sala</button>
+      </div>
+      ${rooms.length === 0 ? `<div class="empty-state">Sin salas activas. Crea la primera.</div>` : `
+        <div class="grid cols-2 gap-3">
+          ${rooms.map((r) => `
+            <div class="card">
+              <h3>${ui.esc(r.name)}</h3>
+              <div class="row gap-2 mt-2">
+                <span class="pill">${r.mode === "50_10" ? "50/10" : "25/5"}</span>
+                <span class="pill">${r.currentPhase === "study" ? "🎯 Estudio" : "☕ Descanso"}</span>
+                <span class="pill muted">${r.members}/${r.capacity}</span>
+              </div>
+              <button class="btn mt-3" data-join-room="${r.id}" ${r.members >= r.capacity ? "disabled" : ""}>${r.members >= r.capacity ? "Llena" : "Unirse"}</button>
+            </div>`).join("")}
+        </div>`}`;
+  }
+
+  function renderDuelsTab() {
+    const duels = state.duelsList || [];
+    return `
+      <div class="row mb-3" style="justify-content:flex-end;">
+        <button class="btn" id="new-duel">+ Retar a alguien</button>
+      </div>
+      ${duels.length === 0 ? `<div class="empty-state">Aún no has participado en ningún duelo.</div>` : `
+        <div class="event-list">
+          ${duels.map((d) => {
+            const isMyTurn = d.opponentId === state.user?.id && d.status === "pending";
+            const won = d.winnerId === state.user?.id;
+            return `<div class="slot-card">
+              <div class="slot-when">
+                <strong>${ui.esc(d.challengeName)}</strong>
+                <small>${ui.esc(d.challengerName)} vs ${ui.esc(d.opponentName)} · ${d.questionIds.length} preguntas</small>
+              </div>
+              ${d.status === "finished" ? `<span class="pill ${won ? "" : "muted"}" style="background:${won ? "rgba(12,143,111,0.15)" : ""};color:${won ? "#0c8f6f" : ""};">${won ? "🏆 Ganaste" : "Terminado"}</span>` :
+                isMyTurn ? `<button class="btn sm" data-accept-duel="${d.id}">Aceptar reto</button>` :
+                `<span class="pill">${d.status === "pending" ? "⏳ Esperando" : ui.esc(d.status)}</span>`}
+            </div>`;
+          }).join("")}
+        </div>`}`;
+  }
+
+  function renderForumTab() {
+    const threads = state.forumThreads || [];
+    return `
+      <div class="row mb-3" style="justify-content:flex-end;">
+        <button class="btn" id="new-thread">+ Abrir hilo</button>
+      </div>
+      ${threads.length === 0 ? `<div class="empty-state">El foro está vacío. Sé el primero en preguntar.</div>` : `
+        <div class="event-list">
+          ${threads.map((t) => `
+            <div class="slot-card">
+              <div class="slot-when">
+                <strong>${ui.esc(t.title)}</strong>
+                <small>por ${ui.esc(t.authorName)} · ${(t.replies || []).length} respuestas${t.topicTag ? ` · #${ui.esc(t.topicTag)}` : ""}</small>
+              </div>
+              <small class="muted">${ui.esc((t.lastReplyAt || t.createdAt || "").slice(0, 10))}</small>
+            </div>`).join("")}
+        </div>`}`;
+  }
+
+  function renderMentorsTab() {
+    const mentors = state.mentors || [];
+    return `
+      <p class="muted text-sm mb-3">Opositores aprobados que ofrecen sesiones de orientación. Solicita una y el mentor decidirá si aceptar.</p>
+      ${mentors.length === 0 ? `<div class="empty-state">Sin mentores disponibles.</div>` : `
+        <div class="grid cols-2 gap-3">
+          ${mentors.map((m) => `
+            <div class="card">
+              <h3>${ui.esc(m.name)}</h3>
+              <p class="text-sm muted">${ui.esc(m.oposicion || "")} · ${m.year || ""} ${m.position ? `· ${ui.esc(m.position)}` : ""}</p>
+              ${m.testimonial ? `<blockquote class="text-sm">"${ui.esc(m.testimonial)}"</blockquote>` : ""}
+              <button class="btn mt-2" data-request-mentor="${m.id}">Solicitar sesión</button>
+            </div>`).join("")}
+        </div>`}`;
+  }
+
+  async function loadCommunity() {
+    const tab = state.communityTab || "streak";
+    try {
+      if (tab === "streak") {
+        const [s, lb] = await Promise.all([api.community.streak(), api.community.leaderboard().catch(() => ({ rows: [] }))]);
+        state.communityStreak = s;
+        state.communityLeaderboard = lb.rows;
+      } else if (tab === "rooms") {
+        const r = await api.community.rooms();
+        state.studyRooms = r.rooms || [];
+      } else if (tab === "duels") {
+        const r = await api.community.duels();
+        state.duelsList = r.duels || [];
+      } else if (tab === "forum") {
+        const r = await api.community.forumThreads();
+        state.forumThreads = r.threads || [];
+      } else if (tab === "mentors") {
+        const r = await api.crm.mentors();
+        state.mentors = r.mentors || [];
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  // ── FASE 6 ampliada: Mis certificaciones (catálogo §A.10.3) ─────────────
+
+  function certsSection() {
+    const items = state.certEligibility || [];
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Tu progreso medido</p><h1>🎖️ Mis certificaciones</h1></div>
+      </div>
+      <p class="muted mb-4">Niveles que tu academia te puede certificar según tus simulacros completados. <strong>Sin valor oficial</strong>: es una acreditación interna que sirve como hito y motivación.</p>
+      ${items.length === 0 ? `<div class="empty-state">Tu academia aún no ha definido niveles de certificación.</div>` : `
+        <div class="grid cols-2 gap-3">
+          ${items.map((lv) => `
+            <div class="card" style="border-left:4px solid ${lv.color};${lv.eligibleNow ? "background:rgba(12,143,111,0.04);" : ""}">
+              <div class="row" style="justify-content:space-between;align-items:flex-start;">
+                <div>
+                  <small style="color:${lv.color};font-weight:700;">${ui.esc(lv.id)}</small>
+                  <h3>${ui.esc(lv.label)}</h3>
+                  <p class="text-sm muted">Criterio: ${lv.minSimulacros} simulacros con nota ≥ ${lv.minScore}/10</p>
+                </div>
+                ${lv.issued ? `<span class="pill" style="background:rgba(12,143,111,0.15);color:#0c8f6f;">✓ Emitido</span>` : ""}
+              </div>
+              <div class="mt-3">
+                <small class="muted">Progreso: ${lv.progress.current}/${lv.progress.target}</small>
+                <div style="height:8px;background:#eef2f7;border-radius:4px;margin-top:4px;overflow:hidden;">
+                  <div style="height:100%;width:${Math.min(100, (lv.progress.current / lv.progress.target) * 100)}%;background:${lv.color};"></div>
+                </div>
+              </div>
+              ${lv.eligibleNow && !lv.issued ? `<button class="btn mt-3" data-issue-cert="${lv.id}">🎖️ Reclamar certificado</button>` : ""}
+              ${lv.issued ? `<a class="ghost mt-3" href="/api/certifications/${lv.certificateId}/render" target="_blank">Ver / descargar SVG</a>` : ""}
+            </div>`).join("")}
+        </div>`}`;
+  }
+
+  async function loadCerts() {
+    try {
+      const r = await api.certifications.mine();
+      state.certEligibility = r.eligibility || [];
+    } catch (e) {
+      state.certEligibility = [];
+    }
+  }
+
+  // ── Mis facturas (PayPal del preparador particular) ─────────────────────
+
+  function invoicesSection() {
+    const invs = state.paypalInvoices || [];
+    if (!invs.length) {
+      return `
+        <div class="section-head">
+          <div><p class="eyebrow">Pagos a tu preparador</p><h1>🧾 Mis facturas</h1></div>
+        </div>
+        <div class="empty-state">
+          <h3>Sin facturas</h3>
+          <p>Cuando tu preparador te emita una factura desde su panel, aparecerá aquí con el botón para pagarla.</p>
+        </div>`;
+    }
+
+    // Resumen arriba
+    const pending = invs.filter((i) => i.status === "pending");
+    const paid = invs.filter((i) => i.status === "paid");
+    const totalPending = pending.reduce((s, i) => s + (i.amount || 0), 0);
+    const totalPaid = paid.reduce((s, i) => s + (i.amount || 0), 0);
+
+    return `
+      <div class="section-head">
+        <div><p class="eyebrow">Pagos a tu preparador</p><h1>🧾 Mis facturas</h1></div>
+      </div>
+
+      <div class="grid cols-3 gap-3 mb-4">
+        <div class="card text-center">
+          <small class="muted">Pendientes</small>
+          <div style="font-size:2em;font-weight:800;color:#d97706;">${pending.length}</div>
+          <small>${totalPending.toFixed(2)} €</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Pagadas</small>
+          <div style="font-size:2em;font-weight:800;color:#0c8f6f;">${paid.length}</div>
+          <small>${totalPaid.toFixed(2)} €</small>
+        </div>
+        <div class="card text-center">
+          <small class="muted">Total facturado</small>
+          <div style="font-size:2em;font-weight:800;">${(totalPaid + totalPending).toFixed(2)}€</div>
+          <small>histórico completo</small>
+        </div>
+      </div>
+
+      ${pending.length ? `
+        <h3 style="margin-bottom:8px;">Pendientes de pago</h3>
+        <div class="event-list mb-4">
+          ${pending.map((inv) => renderInvoiceCard(inv, true)).join("")}
+        </div>` : ""}
+
+      ${paid.length ? `
+        <h3 style="margin-bottom:8px;">Histórico de pagadas</h3>
+        <div class="event-list">
+          ${paid.slice(0, 10).map((inv) => renderInvoiceCard(inv, false)).join("")}
+        </div>` : ""}
+    `;
+  }
+
+  function renderInvoiceCard(inv, payable) {
+    const ref = ui.esc(inv.reference || inv.id);
+    const concept = ui.esc(inv.concept || "");
+    const prepName = ui.esc(inv.preparadorName || "Preparador");
+    const created = (inv.createdAt || "").slice(0, 10);
+    const amountFmt = `${(inv.amount || 0).toFixed(2)} ${ui.esc(inv.currency || "EUR")}`;
+    const statusPill = inv.status === "paid"
+      ? `<span class="pill" style="background:rgba(12,143,111,0.15);color:#0c8f6f;">✓ Pagada</span>`
+      : inv.status === "cancelled"
+      ? `<span class="pill muted">Cancelada</span>`
+      : `<span class="pill" style="background:rgba(217,119,6,0.15);color:#d97706;">⏳ Pendiente</span>`;
+    const payButton = payable && inv.paymentUrl
+      ? `<a class="btn sm" href="${ui.esc(inv.paymentUrl)}" target="_blank" rel="noopener">💸 Pagar con PayPal</a>`
+      : "";
+    const refNote = payable && inv.mode === "link_only"
+      ? `<small class="muted text-sm" style="display:block;margin-top:4px;">Importante: añade la referencia <code>${ref}</code> en el campo "Nota" al pagar para que tu preparador concilie el pago.</small>`
+      : "";
+    return `
+      <div class="slot-card" style="${payable ? "border-left:4px solid #d97706;" : ""}">
+        <div class="slot-when" style="flex:1;">
+          <strong>${concept}</strong>
+          <small>${prepName} · emitida ${ui.esc(created)} · ${ref}</small>
+          ${refNote}
+        </div>
+        <div style="text-align:right;">
+          <div style="font-weight:800;font-size:1.1em;">${amountFmt}</div>
+          ${statusPill}
+          ${payable ? `<div style="margin-top:6px;">${payButton}</div>` : ""}
+          ${inv.paidAt ? `<small class="muted" style="display:block;margin-top:4px;">Pagada ${ui.esc((inv.paidAt || "").slice(0, 10))}</small>` : ""}
+        </div>
+      </div>`;
+  }
+
+  async function loadInvoices() {
+    try {
+      const r = await api.opositor.paypalInvoices();
+      state.paypalInvoices = (r.invoices || []).sort((a, b) => {
+        // Pendientes primero, luego por fecha desc
+        if (a.status !== b.status) {
+          if (a.status === "pending") return -1;
+          if (b.status === "pending") return 1;
+        }
+        return (b.createdAt || "").localeCompare(a.createdAt || "");
+      });
+    } catch (e) {
+      state.paypalInvoices = [];
+    }
+  }
+
   // ── Render + bindings ───────────────────────────────────────────────────
 
   function render() {
@@ -1175,9 +1980,15 @@ const opositorView = (() => {
     else if (state.section === "procedures") content = proceduresSection();
     else if (state.section === "chat") content = chatSection();
     else if (state.section === "billing") content = billingSection();
+    else if (state.section === "invoices") content = invoicesSection();
     else if (state.section === "tools") content = toolsSection();
     else if (state.section === "challenges") content = opoChallengesSection();
     else if (state.section === "nps") content = npsOpoSection();
+    else if (state.section === "predictor") content = predictorSection();
+    else if (state.section === "wellbeing") content = wellbeingSection();
+    else if (state.section === "simulacro") content = simulacroSection();
+    else if (state.section === "community") content = communitySection();
+    else if (state.section === "certs") content = certsSection();
 
     ui.root().innerHTML = shell(content);
     bind();
@@ -1221,9 +2032,15 @@ const opositorView = (() => {
         else if (state.section === "procedures") await loadProcedures();
         else if (state.section === "chat") await loadChat();
         else if (state.section === "billing") await loadBilling();
+        else if (state.section === "invoices") await loadInvoices();
         else if (state.section === "tools") await loadTools();
         else if (state.section === "challenges") await loadOpoChallenges();
         else if (state.section === "nps") await loadNps();
+        else if (state.section === "predictor") await loadPredictor();
+        else if (state.section === "wellbeing") await loadWellbeing();
+        else if (state.section === "simulacro") await loadSimulacros();
+        else if (state.section === "community") await loadCommunity();
+        else if (state.section === "certs") await loadCerts();
         render();
       };
     });
@@ -1471,6 +2288,359 @@ const opositorView = (() => {
         render();
       } catch (err) { ui.toast(err.error || "Error", "error"); }
     };
+
+    // ── FASE 6: Bienestar — formulario de stress check ───────────────────
+    const stressForm = document.getElementById("stress-form");
+    if (stressForm) stressForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(stressForm);
+      const answers = {};
+      for (const [k, v] of fd.entries()) answers[k] = Number(v);
+      try {
+        await api.wellbeing.submitStress(answers, "");
+        ui.toast("Respuesta guardada", "success");
+        await loadWellbeing();
+        render();
+      } catch (err) { ui.toast(err.error || "Error", "error"); }
+    };
+    document.getElementById("redo-stress")?.addEventListener("click", () => {
+      // Forzar re-render del cuestionario aunque ya respondió esta semana
+      if (state.stressCheck) state.stressCheck.alreadyAnswered = false;
+      render();
+    });
+
+    // TTS para recursos de bienestar (Web Speech API client-side)
+    document.querySelectorAll("[data-tts-resource]").forEach((b) => {
+      b.onclick = () => {
+        const id = b.dataset.ttsResource;
+        const r = (state.wellbeingResources || []).find((x) => x.id === id);
+        if (!r) return;
+        if (window.__audio.isSpeaking()) {
+          window.__audio.stop();
+          b.textContent = "🔊 Escuchar";
+          return;
+        }
+        b.textContent = "⏹️ Parar";
+        // Limpiamos el body de markdown para que se lea natural
+        const text = r.title + ". " + (r.body || "")
+          .replace(/^##? .+$/gm, "")
+          .replace(/\*\*/g, "")
+          .replace(/^[-*] /gm, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        window.__audio.speak(text, {
+          onEnd: () => { b.textContent = "🔊 Escuchar"; },
+        });
+      };
+    });
+
+    // ── FASE 6: Simulacro avanzado ───────────────────────────────────────
+    document.getElementById("start-simulacro")?.addEventListener("click", openStartSimulacroModal);
+    document.querySelectorAll("[data-analysis]").forEach((b) => {
+      b.onclick = async () => {
+        try {
+          const r = await api.simulacros.analysis(b.dataset.analysis);
+          state.lastAnalysis = r.analysis;
+          render();
+        } catch (err) { ui.toast(err.error || "Error", "error"); }
+      };
+    });
+
+    // Si está corriendo un simulacro, atar handlers de pregunta
+    if (state.simulacroActive) {
+      const s = state.simulacroActive;
+      const idx = s.currentIdx;
+      // Iniciar timer de pregunta si no está
+      if (!s._timer) {
+        s.questionStartedAt = Date.now();
+        s._timer = setInterval(() => {
+          const t = document.getElementById("q-timer");
+          if (t) t.textContent = `${Math.round((Date.now() - s.questionStartedAt) / 1000)}s`;
+        }, 1000);
+      }
+      document.querySelectorAll("[data-q-opt]").forEach((b) => {
+        b.onclick = () => {
+          const v = Number(b.dataset.qOpt);
+          if (!s.localAnswers[idx]) s.localAnswers[idx] = { chosen: null, changes: 0, confidence: null };
+          if (s.localAnswers[idx].chosen !== null && s.localAnswers[idx].chosen !== v) {
+            s.localAnswers[idx].changes += 1;
+          }
+          s.localAnswers[idx].chosen = v;
+          render();
+        };
+      });
+      document.querySelectorAll("[data-q-conf]").forEach((b) => {
+        b.onclick = () => {
+          if (!s.localAnswers[idx]) s.localAnswers[idx] = { chosen: null, changes: 0, confidence: null };
+          s.localAnswers[idx].confidence = b.dataset.qConf;
+          render();
+        };
+      });
+      document.getElementById("q-prev")?.addEventListener("click", () => moveSimulacro(-1));
+      document.getElementById("q-next")?.addEventListener("click", () => moveSimulacro(1));
+      document.getElementById("q-finish")?.addEventListener("click", finishSimulacro);
+    }
+
+    // ── FASE 6 ampliada: Community ────────────────────────────────────────
+    if (state.section === "community") {
+      document.querySelectorAll("[data-comm-tab]").forEach((b) => {
+        b.onclick = async () => {
+          state.communityTab = b.dataset.commTab;
+          await loadCommunity();
+          render();
+        };
+      });
+      // Crear sala
+      document.getElementById("new-room")?.addEventListener("click", () => {
+        const m = ui.modal({
+          title: "Crear sala Pomodoro",
+          body: `<form id="room-form" class="form">
+            <label>Nombre<input name="name" required placeholder="Estudio Tema 1 / Repaso final…" /></label>
+            <div class="grid cols-2">
+              <label>Modo<select name="mode"><option value="50_10">50 min / 10 min</option><option value="25_5">25 min / 5 min</option></select></label>
+              <label>Capacidad<input name="capacity" type="number" min="2" max="8" value="4" /></label>
+            </div>
+          </form>`,
+          footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="room-save">Crear</button>`,
+        });
+        m.el.querySelector("#room-save").onclick = async () => {
+          const fd = new FormData(m.el.querySelector("#room-form"));
+          try {
+            const r = await api.community.createRoom(Object.fromEntries(fd.entries()));
+            await joinRoom(r.room.id);
+            m.close();
+          } catch (e) { ui.toast(e.error || "Error", "error"); }
+        };
+      });
+      // Unirse a sala
+      document.querySelectorAll("[data-join-room]").forEach((b) => {
+        b.onclick = () => joinRoom(b.dataset.joinRoom);
+      });
+      // Salir de sala
+      document.getElementById("leave-room")?.addEventListener("click", async () => {
+        if (!state.activeRoom) return;
+        try {
+          await api.community.leaveRoom(state.activeRoom.id);
+          if (state._roomTimer) clearInterval(state._roomTimer);
+          if (state._roomUnsub) state._roomUnsub();
+          state.activeRoom = null;
+          state._roomTimer = null;
+          state._roomUnsub = null;
+          await loadCommunity();
+          render();
+        } catch (e) { ui.toast(e.error || "Error", "error"); }
+      });
+      // Crear duelo
+      document.getElementById("new-duel")?.addEventListener("click", () => {
+        const m = ui.modal({
+          title: "Retar a un compañero",
+          body: `<form id="duel-form" class="form">
+            <label>Nombre del reto<input name="challengeName" placeholder="Reto rápido / 10 minutos" /></label>
+            <label>Email del oponente<input name="opponentEmail" type="email" required /></label>
+            <div class="grid cols-2">
+              <label>Nº preguntas<input name="count" type="number" min="3" max="20" value="10" /></label>
+              <label>Proceso<select name="processId">${(state.processes || []).map((p) => `<option value="${ui.esc(p.id)}">${ui.esc(p.name || p.id)}</option>`).join("")}</select></label>
+            </div>
+          </form>`,
+          footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="duel-save">Lanzar reto</button>`,
+        });
+        m.el.querySelector("#duel-save").onclick = async () => {
+          const fd = new FormData(m.el.querySelector("#duel-form"));
+          try {
+            await api.community.createDuel(Object.fromEntries(fd.entries()));
+            ui.toast("Reto enviado", "success");
+            m.close();
+            state.communityTab = "duels";
+            await loadCommunity();
+            render();
+          } catch (e) { ui.toast(e.error || "Error", "error"); }
+        };
+      });
+      // Aceptar duelo (lanza el flujo simplificado de respuestas)
+      document.querySelectorAll("[data-accept-duel]").forEach((b) => {
+        b.onclick = async () => {
+          try {
+            const r = await api.community.acceptDuel(b.dataset.acceptDuel);
+            // Versión simple: pedimos respuestas de forma encadenada
+            const answers = [];
+            const startedAt = Date.now();
+            for (let i = 0; i < r.questions.length; i++) {
+              const q = r.questions[i];
+              const txt = `Pregunta ${i + 1}/${r.questions.length}\n\n${q.text}\n\n` +
+                q.options.map((o, j) => `${String.fromCharCode(65 + j)}. ${o}`).join("\n") +
+                `\n\nResponde con A, B, C o D:`;
+              const a = (prompt(txt) || "").toUpperCase().slice(0, 1);
+              const chosen = ["A","B","C","D"].indexOf(a);
+              if (chosen < 0) { ui.toast("Reto cancelado", "warn"); return; }
+              answers.push({ qbId: q.qbId, chosen, timeMs: Date.now() - startedAt });
+            }
+            await api.community.submitDuel(b.dataset.acceptDuel, answers);
+            ui.toast("Respuestas enviadas", "success");
+            await loadCommunity(); render();
+          } catch (e) { ui.toast(e.error || "Error", "error"); }
+        };
+      });
+      // Nuevo hilo de foro
+      document.getElementById("new-thread")?.addEventListener("click", () => {
+        const m = ui.modal({
+          title: "Abrir hilo en el foro",
+          body: `<form id="thread-form" class="form">
+            <label>Título<input name="title" required /></label>
+            <label>Tag (opcional)<input name="topicTag" placeholder="ej. lpac, t1, plazos" /></label>
+            <label>Pregunta<textarea name="body" rows="5" required></textarea></label>
+          </form>`,
+          footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="thread-save">Publicar</button>`,
+        });
+        m.el.querySelector("#thread-save").onclick = async () => {
+          const fd = new FormData(m.el.querySelector("#thread-form"));
+          try {
+            await api.community.createThread(Object.fromEntries(fd.entries()));
+            ui.toast("Hilo publicado", "success");
+            m.close();
+            await loadCommunity(); render();
+          } catch (e) { ui.toast(e.error || "Error", "error"); }
+        };
+      });
+      // Solicitar mentor
+      document.querySelectorAll("[data-request-mentor]").forEach((b) => {
+        b.onclick = async () => {
+          const message = prompt("Cuéntale al mentor por qué quieres su orientación (1-2 frases):");
+          if (!message) return;
+          try {
+            await api.community.requestMentoring(b.dataset.requestMentor, message);
+            ui.toast("Solicitud enviada al mentor", "success");
+          } catch (e) { ui.toast(e.error || "Error", "error"); }
+        };
+      });
+    }
+
+    // ── FASE 6 ampliada: Mis certificaciones ────────────────────────────
+    if (state.section === "certs") {
+      document.querySelectorAll("[data-issue-cert]").forEach((b) => {
+        b.onclick = async () => {
+          if (!confirm("¿Reclamar este certificado? Quedará registrado en tu perfil.")) return;
+          try {
+            await api.certifications.issue(b.dataset.issueCert);
+            ui.toast("Certificado emitido 🎖️", "success");
+            await loadCerts(); render();
+          } catch (e) { ui.toast(e.error || "Error", "error"); }
+        };
+      });
+    }
+  }
+
+  async function joinRoom(roomId) {
+    try {
+      await api.community.joinRoom(roomId);
+      const update = async () => {
+        try {
+          const r = await api.community.roomState(roomId);
+          state.activeRoom = r;
+          if (state.section === "community" && state.communityTab === "rooms") render();
+        } catch { /* room cerrada */ }
+      };
+      // Carga inicial
+      await update();
+      // Si tenemos WebSocket, suscribimos al canal y reducimos polling a 60s.
+      // Si no, polling cada 10s como fallback.
+      if (window.__realtime) {
+        // Cancelar suscripción previa si existía
+        if (state._roomUnsub) state._roomUnsub();
+        state._roomUnsub = window.__realtime.subscribe(`room:${roomId}`, () => {
+          // Cualquier evento del canal → refetch del estado
+          update();
+        });
+        // Polling de seguridad cada 60s para sincronizar el reloj
+        if (state._roomTimer) clearInterval(state._roomTimer);
+        state._roomTimer = setInterval(update, 60000);
+      } else {
+        if (state._roomTimer) clearInterval(state._roomTimer);
+        state._roomTimer = setInterval(update, 10000);
+      }
+      render();
+    } catch (e) { ui.toast(e.error || "Error", "error"); }
+  }
+
+  function openStartSimulacroModal() {
+    const procs = (state.processes || []).filter((p) => p);
+    const m = ui.modal({
+      title: "Empezar simulacro avanzado",
+      body: `<form id="sim-start" class="form">
+        <p class="muted text-sm">Cada pregunta registra tu tiempo, los cambios y la confianza que declares.</p>
+        <label>Proceso<select name="processId" required>
+          ${procs.map((p) => `<option value="${ui.esc(p.id)}">${ui.esc(p.name || p.id)}</option>`).join("")}
+        </select></label>
+        <label>Número de preguntas<input name="count" type="number" value="20" min="5" max="100" /></label>
+      </form>`,
+      footer: `<button class="ghost" data-close>Cancelar</button><button class="btn" id="sim-go">Empezar</button>`,
+    });
+    m.el.querySelector("#sim-go").onclick = async () => {
+      const fd = new FormData(m.el.querySelector("#sim-start"));
+      try {
+        const r = await api.simulacros.begin({
+          processId: fd.get("processId"),
+          count: Number(fd.get("count")),
+        });
+        state.simulacroActive = {
+          attemptId: r.attemptId,
+          questions: r.questions,
+          currentIdx: 0,
+          questionStartedAt: Date.now(),
+          localAnswers: {},
+          _timer: null,
+        };
+        m.close();
+        render();
+      } catch (err) { ui.toast(err.error || "Error", "error"); }
+    };
+  }
+
+  async function moveSimulacro(delta) {
+    const s = state.simulacroActive;
+    if (!s) return;
+    // Antes de moverse, persistir la respuesta actual
+    await persistCurrentAnswer();
+    s.currentIdx = Math.max(0, Math.min(s.questions.length - 1, s.currentIdx + delta));
+    s.questionStartedAt = Date.now();
+    render();
+  }
+
+  async function persistCurrentAnswer() {
+    const s = state.simulacroActive;
+    if (!s) return;
+    const idx = s.currentIdx;
+    const q = s.questions[idx];
+    const a = s.localAnswers[idx];
+    if (!a || a.chosen === null) return;
+    const timeMs = Date.now() - s.questionStartedAt;
+    try {
+      await api.simulacros.answer(s.attemptId, {
+        qbId: q.qbId,
+        chosen: a.chosen,
+        timeMs: (a.totalTimeMs || 0) + timeMs,
+        changes: a.changes,
+        confidence: a.confidence || "doubt",
+      });
+      a.totalTimeMs = (a.totalTimeMs || 0) + timeMs;
+    } catch (e) {
+      console.error("save answer", e);
+    }
+  }
+
+  async function finishSimulacro() {
+    const s = state.simulacroActive;
+    if (!s) return;
+    if (!confirm("¿Terminar el simulacro? No podrás volver a las preguntas.")) return;
+    await persistCurrentAnswer();
+    try {
+      const r = await api.simulacros.finish(s.attemptId);
+      if (s._timer) clearInterval(s._timer);
+      state.simulacroActive = null;
+      state.lastAnalysis = r.analysis;
+      ui.toast(`Simulacro terminado: ${r.attempt.score}/10`, "success");
+      await loadSimulacros();
+      render();
+    } catch (err) { ui.toast(err.error || "Error", "error"); }
   }
 
   // ── Helpers para herramientas IA y retos ──────────────────────────────────

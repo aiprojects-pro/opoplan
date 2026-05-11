@@ -191,6 +191,28 @@ const templates = {
        <p style="margin-top:20px;">${btn("Ver ranking", ctx.appUrl, ctx.primary)}</p>`),
     text: `Posición #${ctx.position} en ${ctx.challengeName}.`,
   }),
+  // Recordatorio periódico por proximidad de examen (transcripción ~20:30)
+  examProximity: (ctx) => ({
+    subject: `Faltan ${ctx.daysToExam} días para tu examen — ¿cómo vas?`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">Cuenta atrás del examen</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>Faltan <strong>${escape(String(ctx.daysToExam))} días</strong> para tu examen${ctx.examName ? ` de <strong>${escape(ctx.examName)}</strong>` : ""}.</p>
+       ${ctx.intensity === "high" ? `<p>Estamos en la recta final. Mantén el ritmo, repasa los temas con peor tasa de acierto y haz al menos un simulacro completo cada semana.</p>` : ctx.intensity === "medium" ? `<p>Quedan unas semanas: es buen momento para empezar a hacer simulacros completos cronometrados y consolidar lo aprendido.</p>` : `<p>Aún hay margen, pero recuerda que la constancia es lo que marca la diferencia.</p>`}
+       <p style="margin-top:20px;">${btn("Abrir mi panel", ctx.appUrl, ctx.primary)}</p>`),
+    text: `Faltan ${ctx.daysToExam} días para tu examen. Abre ${ctx.appUrl}`,
+  }),
+  // Informe periódico programado (catálogo §A.5, transcripción ~20:15)
+  scheduledReport: (ctx) => ({
+    subject: `Tu informe ${ctx.frequencyLabel} está listo`,
+    html: shell(ctx.orgId,
+      `<h2 style="margin:0 0 12px;color:#08264a;">Informe ${escape(ctx.frequencyLabel)}</h2>
+       <p>Hola ${escape(ctx.name)},</p>
+       <p>Aquí tienes tu informe de progreso correspondiente a las últimas ${escape(String(ctx.windowDays))} días${ctx.preparadorName ? `, preparado por <strong>${escape(ctx.preparadorName)}</strong>` : ""}.</p>
+       <div style="margin:18px 0;padding:14px;background:#f5f7fb;border-radius:8px;">${ctx.reportHtml || ctx.reportText || "(sin contenido)"}</div>
+       <p style="margin-top:20px;">${btn("Ver detalle completo", ctx.appUrl, ctx.primary)}</p>`),
+    text: `Informe ${ctx.frequencyLabel} listo. ${ctx.appUrl}`,
+  }),
 };
 
 async function notify({ orgId, to, template, data, appUrl }) {
