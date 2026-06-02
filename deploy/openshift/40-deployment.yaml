@@ -1,0 +1,125 @@
+# Deployment principal.
+#
+# Decisiones clave:
+#   - replicas: 1 + strategy: Recreate
+#       La app persiste en un JSON único reescrito atómicamente. Dos pods
+#       compitiendo por ese fichero corrompen datos. Cuando migremos a
+#       Postgres se podrá pasar a RollingUpdate con replicas > 1.
+#   - SecurityContext compatible con SCC restricted-v2 (UID aleatorio):
+#       Dockerfile da permisos por gid 0 (chgrp -R 0 + chmod -R g=u).
+#   - initContainer "bootstrap":
+#       Si /app/data/app-data.json no existe, ejecuta scripts/init-production.js
+#       con env del Secret. Idempotente: la segunda vez es no-op.
+#   - Liveness + readiness contra /api/health (no requiere auth).
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opoplan
+  namespace: opoplan
+  labels:
+    app.kubernetes.io/name: opoplan
+    app.kubernetes.io/component: backend
+  annotations:
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"opoplan:latest","namespace":"opoplan"},"fieldPath":"spec.template.spec.containers[?(@.name==\"app\")].image"},{"from":{"kind":"ImageStreamTag","name":"opoplan:latest","namespace":"opoplan"},"fieldPath":"spec.template.spec.initContainers[?(@.name==\"bootstrap\")].image"}]
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opoplan
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opoplan
+        app.kubernetes.io/component: backend
+    spec:
+      securityContext:
+        # OpenShift asigna UID aleatorio; aceptamos su default.
+        # GID 0 está siempre en supplementary groups.
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Bootstrap idempotente: solo siembra si la BD aún no existe.
+        - name: bootstrap
+          image: image-registry.openshift-image-registry.svc:5000/opoplan/opoplan:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              if [ ! -f /app/data/app-data.json ]; then
+                echo "[bootstrap] No hay BD, inicializando producción..."
+                node scripts/init-production.js
+              else
+                echo "[bootstrap] BD existente, no toco nada."
+              fi
+          envFrom:
+            - secretRef:
+                name: opoplan-config
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: uploads
+              mountPath: /app/uploads
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: false
+      containers:
+        - name: app
+          image: image-registry.openshift-image-registry.svc:5000/opoplan/opoplan:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: opoplan-config
+          env:
+            - name: PORT
+              value: "3000"
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: uploads
+              mountPath: /app/uploads
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: false  # node_modules necesita escribir? No, podríamos endurecer
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: opoplan-data
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: opoplan-uploads

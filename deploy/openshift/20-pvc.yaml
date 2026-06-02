@@ -1,0 +1,34 @@
+# Dos PVC sobre el StorageClass del LVM Storage Operator:
+#   - app-data:  contiene data/app-data.json (~MB) + VAPID keys
+#   - app-uploads: archivos subidos en modo STORAGE_PROVIDER=local
+#
+# Ambos ReadWriteOnce — el Deployment tiene replicas:1 con strategy:Recreate
+# por la naturaleza del JSON store. Cuando migremos a Postgres, RWX deja de
+# ser problema (el Pod ya no toca el filesystem para datos).
+#
+# Si tu StorageClass del LVM Operator se llama distinto (verifica con
+# `oc get sc`), cambia el storageClassName.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opoplan-data
+  namespace: opoplan
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: lvms-vg1
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opoplan-uploads
+  namespace: opoplan
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: lvms-vg1
+  resources:
+    requests:
+      storage: 20Gi

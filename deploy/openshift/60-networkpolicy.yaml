@@ -1,0 +1,62 @@
+# Default deny + allow explícito para Router e intra-namespace.
+# Esto evita que cualquier Pod del cluster pueda hablar con OpoPlan
+# directamente (saltándose la Route).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: opoplan
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Permite ingreso desde el router de ingress (puerto 3000 al Pod).
+# En OKD 4.x el ingress está en namespace openshift-ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-ingress
+  namespace: opoplan
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opoplan
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - port: 3000
+          protocol: TCP
+---
+# Egress: DNS al kube-dns + salida a internet por HTTPS para llamar a
+# APIs externas (Stripe, Resend, OpenAI/Gemini/Anthropic, Telegram).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-dns-https
+  namespace: opoplan
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              dns.operator.openshift.io/daemonset-dns: default
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # HTTPS hacia internet
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 80
+          protocol: TCP   # algunos endpoints aún usan 80 antes del redirect

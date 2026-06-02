@@ -1,0 +1,54 @@
+# Construye la imagen DENTRO del cluster a partir del Dockerfile del repo.
+# Output a un ImageStream interno que el Deployment referencia por nombre,
+# así no necesitas registry externo ni Quay para el primer despliegue.
+#
+# Alternativa: si prefieres construir fuera y empujar a un registry externo,
+# borra el ImageStream + BuildConfig y en el Deployment apunta `image:` a
+# tu URL del registry (ej. ghcr.io/cgd/opoplan:v1).
+
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: opoplan
+  namespace: opoplan
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: opoplan
+  namespace: opoplan
+  labels:
+    app.kubernetes.io/name: opoplan
+spec:
+  successfulBuildsHistoryLimit: 3
+  failedBuildsHistoryLimit: 3
+  runPolicy: Serial
+  output:
+    to:
+      kind: ImageStreamTag
+      name: opoplan:latest
+  resources:
+    limits:
+      cpu: "2"
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  source:
+    type: Git
+    contextDir: /
+    git:
+      uri: "https://github.com/aiprojects-pro/opoplan"
+      ref: "main"
+  triggers:
+    - type: GitHub
+      github:
+        secretReference:
+          name: github-webhook

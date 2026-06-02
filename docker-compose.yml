@@ -1,0 +1,70 @@
+# Despliegue productivo de OpoPlan.
+#
+# Uso:
+#   1. Copia .env.example a .env y rellena los secrets (mínimo: SESSION_SECRET
+#      de 32+ caracteres, VAPID keys con `npm run gen-vapid`).
+#   2. Edita el DOMAIN en este archivo (línea environment de caddy) por el
+#      dominio real que apunte por DNS al servidor (ej: opoplan.tu-dominio.com).
+#   3. docker compose up -d
+#
+# Persistencia:
+#   - ./data    → JSON DB (app-data.json) + VAPID keys
+#   - ./uploads → archivos subidos en modo storage=local
+#   - caddy_*   → certificados Let's Encrypt (no perder estos volúmenes o
+#                 Caddy tendrá que re-emitir certs y puede pegarse con el
+#                 rate-limit de Let's Encrypt)
+#
+# Backup:
+#   El script scripts/backup.sh hace dump diario de ./data a ./backups.
+#   Para programarlo: crontab del host, no del contenedor.
+
+services:
+  app:
+    build: .
+    image: opoplan:latest
+    container_name: opoplan-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # APP_URL debe coincidir con el dominio público para que los emails
+      # y enlaces de magic-link apunten a la URL correcta.
+      APP_URL: ${APP_URL:-https://opoplan.local}
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    expose:
+      - "3000"
+    networks:
+      - opoplan
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: opoplan-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - opoplan
+    depends_on:
+      - app
+
+networks:
+  opoplan:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

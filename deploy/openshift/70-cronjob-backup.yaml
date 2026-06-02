@@ -1,0 +1,65 @@
+# Backup diario del PVC data (BD JSON). Empaqueta data/ y uploads/ en un
+# tar.gz dentro del propio PVC bajo backups/, con rotación de 14 días.
+#
+# Pensado como mínimo viable. Si tu cluster tiene el operator de
+# VolumeSnapshot configurado sobre el LVM Storage Operator, te
+# recomendaría usar VolumeSnapshot en lugar de este job (más eficiente
+# y consistente).
+#
+# El backup se queda dentro del mismo PVC (mismo storage físico).
+# Para tolerancia a fallo de disco, copia periódicamente backups/ a
+# almacenamiento externo (S3, otro NFS) — fuera del scope de este YAML.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: opoplan-backup
+  namespace: opoplan
+spec:
+  schedule: "0 3 * * *"     # 03:00 UTC diario
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: tar
+              image: registry.access.redhat.com/ubi9-minimal:latest
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  mkdir -p /data/backups
+                  cd /
+                  tar -czf /data/backups/opoplan-$TS.tar.gz data/app-data.json uploads/ 2>/dev/null || tar -czf /data/backups/opoplan-$TS.tar.gz data/app-data.json
+                  echo "[backup] /data/backups/opoplan-$TS.tar.gz"
+                  # Rotación: mantén los 14 más recientes
+                  ls -1t /data/backups/opoplan-*.tar.gz | tail -n +15 | xargs -r rm -f
+                  ls -lh /data/backups | tail -n 20
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: uploads
+                  mountPath: /uploads
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+                readOnlyRootFilesystem: true
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: opoplan-data
+            - name: uploads
+              persistentVolumeClaim:
+                claimName: opoplan-uploads

@@ -1,0 +1,45 @@
+# Caddyfile — reverse proxy con HTTPS automático (Let's Encrypt).
+#
+# Sustituye el dominio por el real ANTES del primer `docker compose up`.
+# Mientras pruebas localmente puedes usar :80 sin TLS:
+#
+#   :80 {
+#       reverse_proxy app:3000
+#   }
+
+opoplan.tu-dominio.com {
+	encode gzip zstd
+
+	# Cuerpo máximo de subida: 50MB (cubre PDFs, audio corto, imágenes).
+	# Si subes vídeo, sube este límite y revisa también el storage S3/R2.
+	request_body {
+		max_size 50MB
+	}
+
+	# Cabeceras de seguridad mínimas. CSP estricta NO se aplica aún porque la
+	# SPA usa inline scripts; pon una CSP real cuando se externalicen.
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "interest-cohort=()"
+		-Server
+	}
+
+	# Servir WebSocket en /ws junto al resto.
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websocket app:3000
+
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	log {
+		output stderr
+		format json
+	}
+}
